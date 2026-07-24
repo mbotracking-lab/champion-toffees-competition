@@ -17,6 +17,9 @@ export async function GET() {
       ZAI_TOKEN: process.env.ZAI_TOKEN ? 'SET (hidden)' : 'NOT SET',
       ZAI_USER_ID: process.env.ZAI_USER_ID || 'NOT SET',
       ZAI_CHAT_ID: process.env.ZAI_CHAT_ID || 'NOT SET',
+      DATABASE_URL: process.env.DATABASE_URL ? `SET (${process.env.DATABASE_URL.substring(0, 30)}...)` : 'NOT SET',
+      ADMIN_USERNAME: process.env.ADMIN_USERNAME || 'NOT SET',
+      ADMIN_PASSWORD: process.env.ADMIN_PASSWORD ? 'SET (hidden)' : 'NOT SET',
     },
     configFileChecks: {},
   };
@@ -92,6 +95,33 @@ export async function GET() {
     }
   } catch (e) {
     diagnostics.zaiImportError = e instanceof Error ? e.message : String(e);
+  }
+
+  // Test database connectivity
+  const dbUrl = process.env.DATABASE_URL;
+  if (dbUrl) {
+    try {
+      const { neon } = await import('@neondatabase/serverless');
+      const sql = neon(dbUrl);
+      const result = await sql`SELECT COUNT(*)::int as count FROM "CompetitionEntry"`;
+      diagnostics.dbTest = { success: true, entryCount: result[0]?.count ?? 0 };
+    } catch (dbErr) {
+      diagnostics.dbTest = { success: false, error: dbErr instanceof Error ? dbErr.message : String(dbErr) };
+    }
+
+    try {
+      const { neon } = await import('@neondatabase/serverless');
+      const sql = neon(dbUrl);
+      const tables = await sql`
+        SELECT table_name FROM information_schema.tables 
+        WHERE table_schema = 'public'
+      `;
+      diagnostics.dbTables = tables.map((t: Record<string, any>) => t.table_name);
+    } catch (tblErr) {
+      diagnostics.dbTablesError = tblErr instanceof Error ? tblErr.message : String(tblErr);
+    }
+  } else {
+    diagnostics.dbTest = { success: false, error: 'DATABASE_URL not set' };
   }
 
   return NextResponse.json(diagnostics);
