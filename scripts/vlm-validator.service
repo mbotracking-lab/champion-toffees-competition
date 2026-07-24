@@ -1,0 +1,16 @@
+[Unit]
+Description=VLM Batch Validation Scheduler for Champion Toffees Competition
+After=network.target
+
+[Service]
+Type=simple
+User=z
+WorkingDirectory=/home/z/champion-toffees-competition
+ExecStart=/usr/bin/node /home/z/champion-toffees-competition/scripts/validate-scheduler.mjs --interval=30
+Restart=always
+RestartSec=60
+StandardOutput=append:/home/z/champion-toffees-competition/scripts/validation-scheduler-console.log
+StandardError=append:/home/z/champion-toffees-competition/scripts/validation-scheduler-console.log
+
+[Install]
+WantedBy=multi-user.target
