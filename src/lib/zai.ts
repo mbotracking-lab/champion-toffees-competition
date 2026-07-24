@@ -1,48 +1,72 @@
 import ZAI from 'z-ai-web-dev-sdk';
-import { writeFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join } from 'path';
 
 /**
- * Create a ZAI SDK instance.
- * 
- * On Vercel/serverless: writes config from env vars to cwd/.z-ai-config
- * so that ZAI.create() can find it. The .z-ai-config file is also included
- * in the deployment as a fallback.
- * 
- * Locally: uses existing .z-ai-config in project root (or /etc/ fallback).
+ * Create a ZAI SDK instance that works on both Vercel and local environments.
+ *
+ * Strategy:
+ * 1. If ZAI env vars (ZAI_BASE_URL + ZAI_API_KEY) are set → construct ZAI directly
+ * 2. If .z-ai-config file exists in project root → read it and construct ZAI directly
+ * 3. Fall back to ZAI.create() which reads from cwd/.z-ai-config, ~/.z-ai-config, /etc/.z-ai-config
+ *
+ * Note: The ZAI class has a "private" constructor in TypeScript, but JavaScript does NOT
+ * enforce private constructors at runtime. So `new ZAI(config)` works perfectly in practice.
  */
 export async function createZAI(): Promise<ZAI> {
+  // Strategy 1: Use environment variables (best for Vercel)
   const baseUrl = process.env.ZAI_BASE_URL;
   const apiKey = process.env.ZAI_API_KEY;
   const token = process.env.ZAI_TOKEN;
   const userId = process.env.ZAI_USER_ID;
   const chatId = process.env.ZAI_CHAT_ID;
 
-  // If env vars are set, write/update the config file that ZAI.create() reads
-  // This ensures the config is always fresh and available
   if (baseUrl && apiKey) {
-    const config = JSON.stringify({ baseUrl, apiKey, token, userId, chatId });
-    try {
-      writeFileSync(join(process.cwd(), '.z-ai-config'), config);
-      console.log('[ZAI] Config written from env vars to cwd/.z-ai-config');
-    } catch (writeErr) {
-      // Vercel's cwd may be read-only — try /tmp as fallback
-      // The SDK won't check /tmp, but we can try writing there anyway
-      // as a last resort
-      console.log('[ZAI] Could not write to cwd, config file from deployment will be used');
-    }
+    console.log('[ZAI] Initializing from env vars:', baseUrl);
+    // Runtime bypass of "private" constructor — works in JS even if TS complains
+    const config = { baseUrl, apiKey, token, userId, chatId };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return new (ZAI as any)(config) as ZAI;
   }
 
-  // Call ZAI.create() which reads from cwd/.z-ai-config, ~/.z-ai-config, /etc/.z-ai-config
+  // Strategy 2: Read .z-ai-config file from project root and construct directly
+  // This works on Vercel where the file is deployed with the project,
+  // even though ZAI.create() might not find it at process.cwd()
+  try {
+    // Try multiple locations where the file might be
+    const configPaths = [
+      join(process.cwd(), '.z-ai-config'),
+      '/etc/.z-ai-config',
+    ];
+
+    for (const configPath of configPaths) {
+      try {
+        const configStr = readFileSync(configPath, 'utf-8');
+        const configObj = JSON.parse(configStr);
+        if (configObj.baseUrl && configObj.apiKey) {
+          console.log('[ZAI] Initializing from config file:', configPath);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return new (ZAI as any)(configObj) as ZAI;
+        }
+      } catch {
+        // File not found at this path, try next
+      }
+    }
+  } catch (fileErr) {
+    console.log('[ZAI] Could not read config files:', fileErr instanceof Error ? fileErr.message : String(fileErr));
+  }
+
+  // Strategy 3: Fall back to ZAI.create() (uses async loadConfig with 3 fixed paths)
+  console.log('[ZAI] Env vars not set, config files not found, falling back to ZAI.create()');
   try {
     const instance = await ZAI.create();
-    console.log('[ZAI] SDK initialized successfully');
+    console.log('[ZAI] ZAI.create() succeeded');
     return instance;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error('[ZAI] ZAI.create() failed:', msg);
+    console.error('[ZAI] All strategies failed. ZAI.create() error:', msg);
     throw new Error(
-      `ZAI SDK initialization failed. Ensure .z-ai-config file exists in the project, or set ZAI_BASE_URL + ZAI_API_KEY env vars. Details: ${msg}`
+      `ZAI SDK initialization failed. Set ZAI_BASE_URL + ZAI_API_KEY env vars on Vercel, or ensure .z-ai-config file exists. Details: ${msg}`
     );
   }
 }
