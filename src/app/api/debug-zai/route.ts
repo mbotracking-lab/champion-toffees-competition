@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { readdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
 import os from 'os';
+import { getDatabaseUrl } from '@/lib/config';
 
 // Diagnostic endpoint to debug ZAI config file issues on Vercel
 export async function GET() {
@@ -17,7 +18,8 @@ export async function GET() {
       ZAI_TOKEN: process.env.ZAI_TOKEN ? 'SET (hidden)' : 'NOT SET',
       ZAI_USER_ID: process.env.ZAI_USER_ID || 'NOT SET',
       ZAI_CHAT_ID: process.env.ZAI_CHAT_ID || 'NOT SET',
-      DATABASE_URL: process.env.DATABASE_URL ? `SET (${process.env.DATABASE_URL.substring(0, 30)}...)` : 'NOT SET',
+      DATABASE_URL_ENV: process.env.DATABASE_URL ? `SET (${process.env.DATABASE_URL.substring(0, 30)}...)` : 'NOT SET',
+      DATABASE_URL_CONFIG: (() => { const url = getDatabaseUrl(); return url ? `SET (${url.substring(0, 30)}...)` : 'NOT SET'; })(),
       ADMIN_USERNAME: process.env.ADMIN_USERNAME || 'NOT SET',
       ADMIN_PASSWORD: process.env.ADMIN_PASSWORD ? 'SET (hidden)' : 'NOT SET',
     },
@@ -98,7 +100,7 @@ export async function GET() {
   }
 
   // Test database connectivity
-  const dbUrl = process.env.DATABASE_URL;
+  const dbUrl = getDatabaseUrl();
   if (dbUrl) {
     try {
       const { neon } = await import('@neondatabase/serverless');

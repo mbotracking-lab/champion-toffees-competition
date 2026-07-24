@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { PrismaNeonHTTP } from '@prisma/adapter-neon';
+import { getDatabaseUrl } from './config';
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
@@ -8,7 +9,7 @@ const globalForPrisma = globalThis as unknown as {
 // On Vercel (Neon PostgreSQL), use the Neon HTTP adapter with connection string
 // Locally, fall back to regular PrismaClient
 function createPrismaClient() {
-  const dbUrl = process.env.DATABASE_URL;
+  const dbUrl = getDatabaseUrl();
 
   // If DATABASE_URL is a Neon PostgreSQL URL, use the Neon HTTP adapter
   if (dbUrl && (dbUrl.startsWith('postgresql://') || dbUrl.startsWith('postgres://'))) {

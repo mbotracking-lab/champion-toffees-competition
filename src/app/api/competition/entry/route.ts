@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import { db } from '@/lib/db';
+import { getDatabaseUrl } from '@/lib/config';
 
 // Auto-ensure tables and columns exist before creating an entry
 async function ensureTablesExist(): Promise<boolean> {
-  const dbUrl = process.env.DATABASE_URL;
+  const dbUrl = getDatabaseUrl();
   if (!dbUrl) return false;
 
   try {

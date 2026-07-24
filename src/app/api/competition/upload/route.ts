@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import { db } from '@/lib/db';
 import { createZAI } from '@/lib/zai';
+import { getDatabaseUrl } from '@/lib/config';
 
 interface ValidationResult {
   result: 'confirmed' | 'rejected' | 'duplicate';
@@ -29,7 +30,7 @@ function buildStoreListForPrompt(storeNames: string[]): string {
 
 // Auto-ensure tables and columns exist using neon client directly
 async function ensureTablesExist(): Promise<boolean> {
-  const dbUrl = process.env.DATABASE_URL;
+  const dbUrl = getDatabaseUrl();
   if (!dbUrl) return false;
 
   try {

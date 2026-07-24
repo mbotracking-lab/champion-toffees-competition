@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import { db } from '@/lib/db';
+import { getDatabaseUrl } from '@/lib/config';
 
 // GET /api/setup — one-time database setup.
 // Visit this URL once after deploying to create tables and seed data.
 // Safe to visit multiple times — it won't duplicate anything.
 
 export async function GET() {
-  const dbUrl = process.env.DATABASE_URL;
+  const dbUrl = getDatabaseUrl();
   if (!dbUrl) {
     return NextResponse.json(
       { ok: false, error: 'DATABASE_URL is not set in environment variables.' },
