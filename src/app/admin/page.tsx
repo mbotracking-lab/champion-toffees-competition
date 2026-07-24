@@ -84,27 +84,27 @@ interface StatsData {
 
 interface EntryData {
   id: string;
-  entryNumber: string;
+  entryNumber: number;
   consumerName: string;
   consumerPhone: string;
   consumerLocation: string;
   storeName: string;
   slipDate: string;
   slipAmount: string;
-  championProducts: string[];
-  validationResult: 'confirmed' | 'rejected' | 'pending' | 'duplicate';
+  championProducts: string;
+  validationResult: string;
   validationReason: string;
-  confidence: number;
+  confidenceScore: string;
+  validated: boolean;
   isFraud: boolean;
-  fraudReason: string;
+  isDuplicate: boolean;
   createdAt: string;
-  tillSlipImageUrl: string;
 }
 
 interface WinnerData {
   id: string;
   entryId: string;
-  entryNumber: string;
+  entryNumber: number;
   consumerName: string;
   consumerPhone: string;
   consumerLocation: string;
@@ -122,7 +122,7 @@ interface PaginatedEntries {
 
 interface FraudEntry {
   id: string;
-  entryNumber: string;
+  entryNumber: number;
   consumerName: string;
   consumerPhone: string;
   consumerLocation: string;
@@ -307,21 +307,21 @@ export default function AdminDashboard() {
       // Mock data
       const mockEntries: EntryData[] = Array.from({ length: 20 }, (_, i) => ({
         id: `entry-${(entriesPage - 1) * 20 + i + 1}`,
-        entryNumber: `CT-${String((entriesPage - 1) * 20 + i + 1).padStart(5, '0')}`,
+        entryNumber: (entriesPage - 1) * 20 + i + 1,
         consumerName: `Consumer ${entriesPage * 20 - 19 + i}`,
         consumerPhone: `08${String(Math.floor(Math.random() * 900000000 + 100000000))}`,
         consumerLocation: ['Khayelitsha', 'Gugulethu', 'Nyanga', 'Langa', 'Mitchells Plain', 'Delft', 'Philippi'][i % 7],
         storeName: ['Shoprite Khayelitsha', 'Boxer Gugulethu', 'Pick n Pay Nyanga', 'Spar Langa', 'Shoprite Mitchells Plain', 'USave Delft', 'Boxer Philippi'][i % 7],
         slipDate: '2026-07-20',
         slipAmount: `R${String(Math.floor(Math.random() * 500 + 50))}`,
-        championProducts: ['Champion Toffees 250g', 'Champion Toffees 500g', 'Champion Sweets 100g'][i % 3 === 0 ? 0 : i % 3 === 1 ? 1 : 2],
+        championProducts: i % 3 === 0 ? 'Champion Toffees 250g' : i % 3 === 1 ? 'Champion Toffees 500g' : 'Champion Sweets 100g',
         validationResult: (['confirmed', 'rejected', 'pending', 'duplicate'] as const)[i % 4],
         validationReason: i % 4 === 0 ? 'Valid purchase confirmed' : i % 4 === 1 ? 'No Champion product found' : i % 4 === 2 ? 'Awaiting validation' : 'Duplicate entry detected',
-        confidence: i % 4 === 0 ? 0.95 : i % 4 === 1 ? 0.3 : i % 4 === 2 ? 0 : 0.85,
+        confidenceScore: String(i % 4 === 0 ? 95 : i % 4 === 1 ? 30 : i % 4 === 2 ? 0 : 85),
+        validated: i % 4 === 0,
         isFraud: i === 5 || i === 11,
-        fraudReason: i === 5 ? 'Multiple entries from same phone' : i === 11 ? 'Suspicious slip pattern' : '',
+        isDuplicate: i % 4 === 3,
         createdAt: '2026-07-20T10:30:00Z',
-        tillSlipImageUrl: '',
       }));
       setEntries({
         entries: mockEntries,
@@ -464,7 +464,7 @@ export default function AdminDashboard() {
     const rows = entries.entries.map(e => [
       e.entryNumber, e.consumerName, e.consumerPhone, e.consumerLocation,
       e.storeName, e.slipDate, e.slipAmount, e.championProducts,
-      e.validationResult, e.validationReason, e.confidence, e.isFraud ? 'Yes' : 'No',
+      e.validationResult, e.validationReason, e.confidenceScore, e.isFraud ? 'Yes' : 'No',
     ]);
     const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -1338,11 +1338,11 @@ export default function AdminDashboard() {
                     <p className="text-xs text-zinc-500">Confidence</p>
                     <div className="flex items-center gap-2">
                       <Progress
-                        value={selectedEntry.confidence * 100}
+                        value={Number(selectedEntry.confidenceScore)}
                         className="h-2 bg-zinc-800 [&>div]:bg-amber-600"
                       />
                       <span className="text-sm font-bold text-amber-400">
-                        {Math.round(selectedEntry.confidence * 100)}%
+                        {selectedEntry.confidenceScore}%
                       </span>
                     </div>
                   </div>
