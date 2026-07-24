@@ -5,7 +5,7 @@
   "description": "Champion Toffees AI Bot Competition Platform",
   "scripts": {
     "dev": "next dev",
-    "build": "prisma db push && next build",
+    "build": "next build",
     "start": "next start",
     "lint": "eslint .",
     "db:push": "prisma db push",

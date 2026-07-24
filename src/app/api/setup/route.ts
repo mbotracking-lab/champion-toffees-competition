@@ -1,13 +1,78 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 
-// GET /api/setup — one-time database seeder.
-// Visit this URL once after deploying to seed stores and admin.
+// GET /api/setup — one-time database setup.
+// Visit this URL once after deploying to create tables and seed data.
 // Safe to visit multiple times — it won't duplicate anything.
 
 export async function GET() {
   try {
-    // ─── 1. Create admin user (if doesn't exist) ───
+    // ─── Step 1: Create database tables using raw SQL ───
+    // This ensures the schema exists even if prisma db push didn't run during build
+
+    const createTableSQL = `
+      CREATE TABLE IF NOT EXISTS "CompetitionEntry" (
+        "id" TEXT NOT NULL PRIMARY KEY DEFAULT gen_random_uuid()::text,
+        "consumerName" TEXT NOT NULL,
+        "consumerPhone" TEXT NOT NULL DEFAULT '',
+        "consumerLocation" TEXT NOT NULL DEFAULT '',
+        "slipPhotoUrl" TEXT NOT NULL DEFAULT '',
+        "slipPhotoData" TEXT NOT NULL DEFAULT '',
+        "validated" BOOLEAN NOT NULL DEFAULT false,
+        "validationResult" TEXT NOT NULL DEFAULT 'pending',
+        "validationReason" TEXT NOT NULL DEFAULT '',
+        "storeName" TEXT NOT NULL DEFAULT '',
+        "slipDate" TEXT NOT NULL DEFAULT '',
+        "slipAmount" TEXT NOT NULL DEFAULT '',
+        "championProducts" TEXT NOT NULL DEFAULT '',
+        "confidenceScore" TEXT NOT NULL DEFAULT '',
+        "isDuplicate" BOOLEAN NOT NULL DEFAULT false,
+        "isFraud" BOOLEAN NOT NULL DEFAULT false,
+        "entryNumber" INTEGER NOT NULL DEFAULT 0,
+        "createdAt" TIMESTAMP NOT NULL DEFAULT now(),
+        "updatedAt" TIMESTAMP NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS "CompetitionStats" (
+        "id" TEXT NOT NULL PRIMARY KEY DEFAULT gen_random_uuid()::text,
+        "totalEntries" INTEGER NOT NULL DEFAULT 0,
+        "confirmedEntries" INTEGER NOT NULL DEFAULT 0,
+        "rejectedEntries" INTEGER NOT NULL DEFAULT 0,
+        "duplicateEntries" INTEGER NOT NULL DEFAULT 0,
+        "fraudEntries" INTEGER NOT NULL DEFAULT 0,
+        "pendingEntries" INTEGER NOT NULL DEFAULT 0,
+        "updatedAt" TIMESTAMP NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS "CompetitionWinner" (
+        "id" TEXT NOT NULL PRIMARY KEY DEFAULT gen_random_uuid()::text,
+        "entryId" TEXT NOT NULL UNIQUE,
+        "prize" TEXT NOT NULL,
+        "drawnAt" TIMESTAMP NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS "AdminUser" (
+        "id" TEXT NOT NULL PRIMARY KEY DEFAULT gen_random_uuid()::text,
+        "username" TEXT NOT NULL UNIQUE,
+        "passwordHash" TEXT NOT NULL,
+        "role" TEXT NOT NULL DEFAULT 'admin',
+        "createdAt" TIMESTAMP NOT NULL DEFAULT now(),
+        "updatedAt" TIMESTAMP NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS "ParticipatingStore" (
+        "id" TEXT NOT NULL PRIMARY KEY DEFAULT gen_random_uuid()::text,
+        "name" TEXT NOT NULL UNIQUE,
+        "region" TEXT NOT NULL DEFAULT '',
+        "createdAt" TIMESTAMP NOT NULL DEFAULT now(),
+        "updatedAt" TIMESTAMP NOT NULL DEFAULT now()
+      );
+    `;
+
+    await db.$executeRawUnsafe(createTableSQL);
+
+    // ─── Step 2: Create admin user (if doesn't exist) ───
+    let adminCreated = false;
     const existingAdmin = await db.adminUser.findUnique({ where: { username: 'admin' } });
     if (!existingAdmin) {
       await db.adminUser.create({
@@ -17,9 +82,11 @@ export async function GET() {
           role: 'admin',
         },
       });
+      adminCreated = true;
     }
 
-    // ─── 2. Seed participating stores (if they don't exist) ───
+    // ─── Step 3: Seed participating stores (if they don't exist) ───
+    let storesCreated = 0;
     const existingStores = await db.participatingStore.count();
     if (existingStores === 0) {
       const stores = [
@@ -47,21 +114,24 @@ export async function GET() {
         { name: 'Big Save Hamanskraal', region: '' },
       ];
       await db.participatingStore.createMany({ data: stores });
+      storesCreated = 22;
     }
 
-    // ─── 3. Return success ───
+    // ─── Return success ───
     return NextResponse.json({
       ok: true,
-      message: 'Database seeded successfully!',
-      adminCreated: !existingAdmin,
-      storesCreated: existingStores === 0 ? 22 : 0,
+      message: 'Database setup complete! Tables created and data seeded.',
+      tablesCreated: true,
+      adminCreated,
+      storesCreated,
     });
   } catch (error) {
     console.error('Setup error:', error);
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
       {
         ok: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: errorMsg,
         hint: 'Make sure DATABASE_URL is set to a Neon PostgreSQL connection string in Vercel Environment Variables.',
       },
       { status: 500 }
