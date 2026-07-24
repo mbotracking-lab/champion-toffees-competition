@@ -179,7 +179,10 @@ export async function GET() {
     try {
       const existingAdmins = await sql`SELECT id FROM "AdminUser" WHERE username = 'admin'`;
       if (existingAdmins.length === 0) {
-        await sql`INSERT INTO "AdminUser" (username, passwordHash, role) VALUES ('admin', 'champion2026', 'admin')`;
+        // Use gen_random_uuid() explicitly since neon HTTP may not honor DEFAULT
+        await sql.query(
+          `INSERT INTO "AdminUser" (id, username, passwordHash, role) VALUES (gen_random_uuid()::text, 'admin', 'champion2026', 'admin')`
+        );
         adminCreated = true;
         log.push('Admin user created');
       } else {
@@ -206,7 +209,12 @@ export async function GET() {
           ['Big Save Hamanskraal', ''],
         ];
         for (const [name, region] of storeInserts) {
-          await sql`INSERT INTO "ParticipatingStore" (name, region) VALUES (${name}, ${region})`;
+          // Use sql.query() with explicit gen_random_uuid() since neon HTTP
+          // doesn't properly support DEFAULT values in some cases
+          await sql.query(
+            `INSERT INTO "ParticipatingStore" (id, name, region) VALUES (gen_random_uuid()::text, $1, $2)`,
+            [name, region]
+          );
         }
         storesCreated = 22;
         log.push('Stores seeded (22)');
