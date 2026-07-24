@@ -209,12 +209,12 @@ export async function GET() {
           ['Big Save Hamanskraal', ''],
         ];
         for (const [name, region] of storeInserts) {
-          // Neon HTTP adapter doesn't support parameterized inserts reliably,
-          // so we embed values directly in the SQL string (safe since we control these values)
+          // Neon HTTP adapter doesn't honor DEFAULT values,
+          // so we must provide ALL columns explicitly
           const escapedName = name.replace(/'/g, "''");
           const escapedRegion = region.replace(/'/g, "''");
           await sql.query(
-            `INSERT INTO "ParticipatingStore" (id, name, region) VALUES (gen_random_uuid()::text, '${escapedName}', '${escapedRegion}')`
+            `INSERT INTO "ParticipatingStore" (id, name, region, "createdAt", "updatedAt") VALUES (gen_random_uuid()::text, '${escapedName}', '${escapedRegion}', now(), now())`
           );
         }
         storesCreated = 22;
