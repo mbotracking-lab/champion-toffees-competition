@@ -68,6 +68,9 @@ import {
   TrendingUp,
   Star,
   Trash2,
+  CheckSquare,
+  Square,
+  X,
 } from 'lucide-react';
 
 // ─── Types ───
@@ -193,6 +196,19 @@ export default function AdminDashboard() {
   const [drawLoading, setDrawLoading] = useState(false);
 
   const [activeTab, setActiveTab] = useState('overview');
+
+  // Bulk selection state
+  const [selectedEntries, setSelectedEntries] = useState<Set<string>>(new Set());
+  const [selectedFraud, setSelectedFraud] = useState<Set<string>>(new Set());
+  const [selectedWinners, setSelectedWinners] = useState<Set<string>>(new Set());
+  const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
+
+  // Clear selection when switching tabs
+  useEffect(() => {
+    setSelectedEntries(new Set());
+    setSelectedFraud(new Set());
+    setSelectedWinners(new Set());
+  }, [activeTab]);
 
   // ─── API Helper ───
   const apiCall = useCallback(async (url: string, options?: RequestInit) => {
@@ -546,6 +562,73 @@ export default function AdminDashboard() {
     if (isAuthenticated && activeTab === 'winners') fetchWinners();
   }, [isAuthenticated, activeTab, fetchWinners]);
 
+  // ─── Bulk Delete Entries ───
+  const handleBulkDeleteEntries = async () => {
+    if (selectedEntries.size === 0) return;
+    if (!confirm(`Are you sure you want to delete ${selectedEntries.size} entries? This will also remove any winner records linked to these entries. This cannot be undone.`)) return;
+    setBulkDeleteLoading(true);
+    try {
+      await Promise.all(
+        Array.from(selectedEntries).map(id =>
+          apiCall(`/api/competition/admin/entry/${id}`, { method: 'DELETE' })
+        )
+      );
+      setSelectedEntries(new Set());
+      fetchEntries();
+      fetchStats();
+      fetchWinners();
+    } catch {
+      fetchEntries();
+      fetchStats();
+    } finally {
+      setBulkDeleteLoading(false);
+    }
+  };
+
+  // ─── Bulk Delete Fraud (mark as confirmed/rejected) ───
+  const handleBulkDeleteFraud = async () => {
+    if (selectedFraud.size === 0) return;
+    if (!confirm(`Are you sure you want to delete ${selectedFraud.size} flagged entries? This cannot be undone.`)) return;
+    setBulkDeleteLoading(true);
+    try {
+      await Promise.all(
+        Array.from(selectedFraud).map(id =>
+          apiCall(`/api/competition/admin/entry/${id}`, { method: 'DELETE' })
+        )
+      );
+      setSelectedFraud(new Set());
+      fetchFraud();
+      fetchStats();
+    } catch {
+      fetchFraud();
+      fetchStats();
+    } finally {
+      setBulkDeleteLoading(false);
+    }
+  };
+
+  // ─── Bulk Delete Winners ───
+  const handleBulkDeleteWinners = async () => {
+    if (selectedWinners.size === 0) return;
+    if (!confirm(`Are you sure you want to remove ${selectedWinners.size} winner records? The original entries will remain.`)) return;
+    setBulkDeleteLoading(true);
+    try {
+      await Promise.all(
+        Array.from(selectedWinners).map(id =>
+          apiCall(`/api/competition/admin/winner/${id}`, { method: 'DELETE' })
+        )
+      );
+      setSelectedWinners(new Set());
+      fetchWinners();
+      fetchStats();
+    } catch {
+      fetchWinners();
+      fetchStats();
+    } finally {
+      setBulkDeleteLoading(false);
+    }
+  };
+
   // ─── Status Badge ───
   const statusBadge = (status: string) => {
     const config: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline'; label: string; className: string }> = {
@@ -864,6 +947,30 @@ export default function AdminDashboard() {
               ENTRIES TAB
               ═══════════════════════════════════════════════ */}
           <TabsContent value="entries" className="space-y-4">
+            {/* Bulk Action Bar */}
+            {selectedEntries.size > 0 && (
+              <div className="sticky top-16 z-20 bg-amber-900/95 backdrop-blur border border-amber-700/40 rounded-xl px-4 py-3 flex items-center gap-3 shadow-lg shadow-amber-900/20">
+                <span className="text-amber-400 font-semibold text-sm">{selectedEntries.size} selected</span>
+                <Button
+                  size="sm"
+                  className="bg-red-600 hover:bg-red-700 text-white rounded-full text-xs"
+                  onClick={handleBulkDeleteEntries}
+                  disabled={bulkDeleteLoading}
+                >
+                  {bulkDeleteLoading ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Trash2 className="w-3 h-3 mr-1" />}
+                  Delete Selected
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-zinc-400 hover:text-zinc-100 rounded-full text-xs"
+                  onClick={() => setSelectedEntries(new Set())}
+                >
+                  <X className="w-3 h-3 mr-1" /> Clear
+                </Button>
+              </div>
+            )}
+
             {/* Filters */}
             <Card className="bg-zinc-900 border-zinc-800">
               <CardContent className="p-4">
@@ -965,6 +1072,25 @@ export default function AdminDashboard() {
                       <Table>
                         <TableHeader>
                           <TableRow className="border-zinc-800 hover:bg-transparent">
+                            <TableHead className="text-zinc-400 bg-zinc-900 sticky top-0 w-10">
+                              <button
+                                onClick={() => {
+                                  if (!entries) return;
+                                  const allIds = entries.entries.map(e => e.id);
+                                  if (selectedEntries.size === allIds.length && allIds.every(id => selectedEntries.has(id))) {
+                                    setSelectedEntries(new Set());
+                                  } else {
+                                    setSelectedEntries(new Set(allIds));
+                                  }
+                                }}
+                                className="cursor-pointer"
+                              >
+                                {entries && selectedEntries.size === entries.entries.length && entries.entries.every(e => selectedEntries.has(e.id))
+                                  ? <CheckSquare className="w-4 h-4 text-amber-400" />
+                                  : <Square className="w-4 h-4 text-zinc-500 hover:text-zinc-300" />
+                                }
+                              </button>
+                            </TableHead>
                             <TableHead className="text-zinc-400 bg-zinc-900 sticky top-0">Entry #</TableHead>
                             <TableHead className="text-zinc-400 bg-zinc-900 sticky top-0">Name</TableHead>
                             <TableHead className="text-zinc-400 bg-zinc-900 sticky top-0">Phone</TableHead>
@@ -980,9 +1106,25 @@ export default function AdminDashboard() {
                           {entries.entries.map((entry) => (
                             <TableRow
                               key={entry.id}
-                              className="border-zinc-800/50 hover:bg-zinc-800/50 cursor-pointer"
+                              className={`border-zinc-800/50 hover:bg-zinc-800/50 cursor-pointer ${selectedEntries.has(entry.id) ? 'bg-amber-900/20 border-amber-700/30' : ''}`}
                               onClick={() => openDetailDialog(entry)}
                             >
+                              <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  onClick={() => {
+                                    const newSet = new Set(selectedEntries);
+                                    if (newSet.has(entry.id)) newSet.delete(entry.id);
+                                    else newSet.add(entry.id);
+                                    setSelectedEntries(newSet);
+                                  }}
+                                  className="cursor-pointer"
+                                >
+                                  {selectedEntries.has(entry.id)
+                                    ? <CheckSquare className="w-4 h-4 text-amber-400" />
+                                    : <Square className="w-4 h-4 text-zinc-500 hover:text-zinc-300" />
+                                  }
+                                </button>
+                              </TableCell>
                               <TableCell className="text-amber-400 font-medium text-xs">
                                 {entry.entryNumber}
                               </TableCell>
@@ -1068,6 +1210,30 @@ export default function AdminDashboard() {
               FRAUD TAB
               ═══════════════════════════════════════════════ */}
           <TabsContent value="fraud" className="space-y-4">
+            {/* Bulk Action Bar for Fraud */}
+            {selectedFraud.size > 0 && (
+              <div className="sticky top-16 z-20 bg-orange-900/95 backdrop-blur border border-orange-700/40 rounded-xl px-4 py-3 flex items-center gap-3 shadow-lg shadow-orange-900/20">
+                <span className="text-orange-400 font-semibold text-sm">{selectedFraud.size} selected</span>
+                <Button
+                  size="sm"
+                  className="bg-red-600 hover:bg-red-700 text-white rounded-full text-xs"
+                  onClick={handleBulkDeleteFraud}
+                  disabled={bulkDeleteLoading}
+                >
+                  {bulkDeleteLoading ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Trash2 className="w-3 h-3 mr-1" />}
+                  Delete Selected
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-zinc-400 hover:text-zinc-100 rounded-full text-xs"
+                  onClick={() => setSelectedFraud(new Set())}
+                >
+                  <X className="w-3 h-3 mr-1" /> Clear
+                </Button>
+              </div>
+            )}
+
             {fraudLoading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
@@ -1102,11 +1268,48 @@ export default function AdminDashboard() {
                 </Card>
 
                 {/* Fraud Entries List */}
+                {/* Select All */}
+                {fraudEntries.length > 0 && (
+                  <div className="flex items-center gap-2 px-1">
+                    <button
+                      onClick={() => {
+                        const allIds = fraudEntries.map(e => e.id);
+                        if (selectedFraud.size === allIds.length && allIds.every(id => selectedFraud.has(id))) {
+                          setSelectedFraud(new Set());
+                        } else {
+                          setSelectedFraud(new Set(allIds));
+                        }
+                      }}
+                      className="flex items-center gap-2 text-zinc-400 hover:text-zinc-300 transition-colors cursor-pointer"
+                    >
+                      {selectedFraud.size === fraudEntries.length && fraudEntries.every(e => selectedFraud.has(e.id))
+                        ? <CheckSquare className="w-4 h-4 text-orange-400" />
+                        : <Square className="w-4 h-4 text-zinc-500" />
+                      }
+                      <span className="text-xs">Select all ({fraudEntries.length})</span>
+                    </button>
+                  </div>
+                )}
+
                 <div className="space-y-3 max-h-[600px] overflow-y-auto">
                   {fraudEntries.map((entry) => (
-                    <Card key={entry.id} className="bg-zinc-900 border-zinc-800 hover:border-orange-700/30 transition-colors">
+                    <Card key={entry.id} className={`bg-zinc-900 border-zinc-800 hover:border-orange-700/30 transition-colors ${selectedFraud.has(entry.id) ? 'border-orange-700/40 bg-orange-900/10' : ''}`}>
                       <CardContent className="p-4">
                         <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+                          <button
+                            onClick={() => {
+                              const newSet = new Set(selectedFraud);
+                              if (newSet.has(entry.id)) newSet.delete(entry.id);
+                              else newSet.add(entry.id);
+                              setSelectedFraud(newSet);
+                            }}
+                            className="flex-shrink-0 cursor-pointer mt-1"
+                          >
+                            {selectedFraud.has(entry.id)
+                              ? <CheckSquare className="w-5 h-5 text-orange-400" />
+                              : <Square className="w-5 h-5 text-zinc-500 hover:text-zinc-300 transition-colors" />
+                            }
+                          </button>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-2">
                               <span className="text-amber-400 font-medium text-sm">{entry.entryNumber}</span>
@@ -1195,6 +1398,30 @@ export default function AdminDashboard() {
               WINNERS TAB
               ═══════════════════════════════════════════════ */}
           <TabsContent value="winners" className="space-y-4">
+            {/* Bulk Action Bar for Winners */}
+            {selectedWinners.size > 0 && (
+              <div className="sticky top-16 z-20 bg-amber-900/95 backdrop-blur border border-amber-700/40 rounded-xl px-4 py-3 flex items-center gap-3 shadow-lg shadow-amber-900/20">
+                <span className="text-amber-400 font-semibold text-sm">{selectedWinners.size} selected</span>
+                <Button
+                  size="sm"
+                  className="bg-red-600 hover:bg-red-700 text-white rounded-full text-xs"
+                  onClick={handleBulkDeleteWinners}
+                  disabled={bulkDeleteLoading}
+                >
+                  {bulkDeleteLoading ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Trash2 className="w-3 h-3 mr-1" />}
+                  Remove Selected Winners
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-zinc-400 hover:text-zinc-100 rounded-full text-xs"
+                  onClick={() => setSelectedWinners(new Set())}
+                >
+                  <X className="w-3 h-3 mr-1" /> Clear
+                </Button>
+              </div>
+            )}
+
             {/* Draw Controls */}
             <Card className="bg-zinc-900 border-zinc-800">
               <CardHeader className="pb-2">
@@ -1266,6 +1493,24 @@ export default function AdminDashboard() {
                         <Table>
                           <TableHeader>
                             <TableRow className="border-zinc-800 hover:bg-transparent">
+                              <TableHead className="text-zinc-400 bg-zinc-900 sticky top-0 w-10">
+                                <button
+                                  onClick={() => {
+                                    const allIds = winners.map(w => w.id);
+                                    if (selectedWinners.size === allIds.length && allIds.every(id => selectedWinners.has(id))) {
+                                      setSelectedWinners(new Set());
+                                    } else {
+                                      setSelectedWinners(new Set(allIds));
+                                    }
+                                  }}
+                                  className="cursor-pointer"
+                                >
+                                  {selectedWinners.size === winners.length && winners.every(w => selectedWinners.has(w.id))
+                                    ? <CheckSquare className="w-4 h-4 text-amber-400" />
+                                    : <Square className="w-4 h-4 text-zinc-500 hover:text-zinc-300" />
+                                  }
+                                </button>
+                              </TableHead>
                               <TableHead className="text-zinc-400 bg-zinc-900 sticky top-0">Entry #</TableHead>
                               <TableHead className="text-zinc-400 bg-zinc-900 sticky top-0">Name</TableHead>
                               <TableHead className="text-zinc-400 bg-zinc-900 sticky top-0">Phone</TableHead>
@@ -1277,7 +1522,23 @@ export default function AdminDashboard() {
                           </TableHeader>
                           <TableBody>
                             {winners.map((winner) => (
-                              <TableRow key={winner.id} className="border-zinc-800/50 hover:bg-zinc-800/50">
+                              <TableRow key={winner.id} className={`border-zinc-800/50 hover:bg-zinc-800/50 ${selectedWinners.has(winner.id) ? 'bg-amber-900/20 border-amber-700/30' : ''}`}>
+                                <TableCell className="w-10">
+                                  <button
+                                    onClick={() => {
+                                      const newSet = new Set(selectedWinners);
+                                      if (newSet.has(winner.id)) newSet.delete(winner.id);
+                                      else newSet.add(winner.id);
+                                      setSelectedWinners(newSet);
+                                    }}
+                                    className="cursor-pointer"
+                                  >
+                                    {selectedWinners.has(winner.id)
+                                      ? <CheckSquare className="w-4 h-4 text-amber-400" />
+                                      : <Square className="w-4 h-4 text-zinc-500 hover:text-zinc-300" />
+                                    }
+                                  </button>
+                                </TableCell>
                                 <TableCell className="text-amber-400 font-medium text-xs">
                                   {winner.entryNumber}
                                 </TableCell>
