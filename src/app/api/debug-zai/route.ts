@@ -127,6 +127,65 @@ export async function GET() {
     diagnostics.dbTest = { success: false, error: 'DATABASE_URL not set' };
   }
 
+  // Test direct fetch to ZAI API endpoint
+  try {
+    const configStr = readFileSync(join(cwd, '.z-ai-config'), 'utf-8');
+    const configObj = JSON.parse(configStr);
+    const baseUrl = configObj.baseUrl || 'https://internal-api.z.ai/v1';
+    
+    // Test 1: Simple GET to base URL
+    try {
+      const response = await fetch(baseUrl, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${configObj.token || ''}` },
+      });
+      diagnostics.directFetchTest = {
+        success: true,
+        status: response.status,
+        statusText: response.statusText,
+        url: baseUrl,
+      };
+    } catch (fetchErr) {
+      diagnostics.directFetchTest = {
+        success: false,
+        error: fetchErr instanceof Error ? fetchErr.message : String(fetchErr),
+        errorCause: (fetchErr as any)?.cause?.message || (fetchErr as any)?.cause?.code || 'no cause',
+        errorStack: fetchErr instanceof Error ? fetchErr.stack?.substring(0, 500) : undefined,
+        url: baseUrl,
+      };
+    }
+
+    // Test 2: POST to chat/completions endpoint with a simple text message
+    try {
+      const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${configObj.token || ''}`,
+        },
+        body: JSON.stringify({
+          model: 'glm-4-plus',
+          messages: [{ role: 'user', content: 'Say hello' }],
+        }),
+      });
+      const bodyText = await response.text();
+      diagnostics.chatCompletionsFetch = {
+        success: true,
+        status: response.status,
+        bodyPreview: bodyText.substring(0, 300),
+      };
+    } catch (chatFetchErr) {
+      diagnostics.chatCompletionsFetch = {
+        success: false,
+        error: chatFetchErr instanceof Error ? chatFetchErr.message : String(chatFetchErr),
+        errorCause: (chatFetchErr as any)?.cause?.message || (chatFetchErr as any)?.cause?.code || 'no cause',
+        errorStack: chatFetchErr instanceof Error ? chatFetchErr.stack?.substring(0, 500) : undefined,
+      };
+    }
+  } catch (configErr) {
+    diagnostics.directFetchTest = { success: false, error: 'Config file not found' };
+  }
+
   // Test VLM vision call
   try {
     const zai = await createZAI();
