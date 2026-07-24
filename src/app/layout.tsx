@@ -6,11 +6,11 @@ const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Champion Toffees Competition — Buy, Snap, Win!",
-  description: "Buy Champion Toffees, snap your till slip, and win amazing prizes! AI-powered instant validation.",
+  title: "Champion Toffees Competition Bot — Buy, Snap, Win!",
+  description: "Chat with our AI bot to enter the Champion Toffees competition! Buy Champion Toffees, snap your till slip, and win amazing prizes.",
   openGraph: {
-    title: "Champion Toffees Competition — Buy, Snap, Win!",
-    description: "Buy Champion Toffees, snap your till slip, and win amazing prizes!",
+    title: "Champion Toffees Competition Bot — Buy, Snap, Win!",
+    description: "Chat with our AI bot to enter the Champion Toffees competition!",
     type: "website",
   },
 };

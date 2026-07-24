@@ -1,53 +1,54 @@
 'use client';
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
+  Trophy,
   Camera,
   Upload,
   CheckCircle2,
   XCircle,
   AlertTriangle,
-  ArrowRight,
-  ArrowLeft,
-  Trophy,
-  Star,
-  ShieldCheck,
-  Zap,
-  Sparkles,
-  Gift,
-  ShoppingCart,
-  FileText,
   Loader2,
-  RefreshCw,
   Copy,
   Share2,
-  ChevronRight,
   Phone,
-  MapPin,
-  User,
-  Eye,
+  ShieldCheck,
   ScanLine,
-  Image as ImageIcon,
+  Eye,
+  Fingerprint,
+  Sparkles,
+  Star,
+  Gift,
   Clock,
   PartyPopper,
   CircleCheck,
   Ban,
-  Fingerprint,
-  CalendarDays,
+  Image as ImageIcon,
   Store,
+  CalendarDays,
   Home,
+  User,
+  ChevronDown,
+  Send,
+  Paperclip,
+  RefreshCw,
 } from 'lucide-react';
 
 // ─── Types ───
-type Step = 'landing' | 'register' | 'upload' | 'validating' | 'result' | 'confirmed';
+type ChatPhase = 'greeting' | 'askDob' | 'askFirstName' | 'askSurname' | 'askTraderName' | 'askStoreAddress' | 'askWholesale' | 'askPhone' | 'confirmDetails' | 'askSlip' | 'validating' | 'resultConfirmed' | 'resultRejected' | 'resultDuplicate' | 'startOver';
+
+interface ChatMessage {
+  id: string;
+  from: 'bot' | 'user';
+  text: string;
+  timestamp: Date;
+  type?: 'text' | 'image' | 'options' | 'details' | 'result' | 'typing';
+  imageUrl?: string;
+  options?: string[];
+  details?: Record<string, string>;
+  resultData?: ValidationResult;
+}
 
 interface EntryData {
   id: string;
@@ -78,37 +79,219 @@ interface ParticipatingStore {
   region: string;
 }
 
-// ─── Constants ───
-const BRAND_COLORS = {
-  bg: '#FAF3E3',
+// ─── Brand Colors ───
+const BRAND = {
+  bg: '#ECE5DD',          // WhatsApp-style chat background
+  headerBg: '#075E54',    // WhatsApp teal-green
+  headerAccent: '#128C7E',
+  botBubble: '#FFFFFF',
+  userBubble: '#DCF8C6',  // WhatsApp light green
   text: '#3D2B1F',
   gold: '#D97706',
   goldLight: '#F59E0B',
   goldDark: '#92400E',
   cream: '#FFF8E7',
-  brownLight: '#5C3D2E',
-  brownDark: '#2D1B0E',
+  inputBg: '#F0F0F0',
+  green: '#25D366',
+  greenDark: '#075E54',
+  timeColor: '#999',
+  errorRed: '#DC2626',
+  successGreen: '#16A34A',
 };
 
-const STEP_LABELS: Record<Step, string> = {
-  landing: 'Welcome',
-  register: 'Register',
-  upload: 'Upload Slip',
-  validating: 'Validating',
-  result: 'Result',
-  confirmed: 'Confirmed!',
-};
-
-const STEP_ORDER: Step[] = ['landing', 'register', 'upload', 'validating', 'result', 'confirmed'];
-
-const VALIDATION_STAGES = [
-  { label: 'Scanning receipt...', icon: ScanLine, duration: 2500 },
-  { label: 'Extracting purchase data...', icon: Eye, duration: 2500 },
-  { label: 'Verifying Champion products...', icon: ShieldCheck, duration: 2500 },
-  { label: 'Checking for duplicates...', icon: Fingerprint, duration: 2000 },
+// ─── Chat Flow Definition ───
+const CHAT_FLOW: { phase: ChatPhase; botMessage: string }[] = [
+  { phase: 'greeting', botMessage: '👋 Welcome to the Champion Toffees "Buy, Snap, Win!" Competition!\n\nPurchase Champion Toffees from a participating wholesale store, snap your till slip, and you could win amazing prizes!\n\nOur AI will instantly verify your entry. Let\'s get you started! 🏆' },
+  { phase: 'askDob', botMessage: 'First, I need a few details from you.\n\nWhat is your Date of Birth? (DD/MM/YYYY)' },
+  { phase: 'askFirstName', botMessage: 'Great! ✅\n\nWhat is your First Name?' },
+  { phase: 'askSurname', botMessage: 'And what is your Surname?' },
+  { phase: 'askTraderName', botMessage: 'What is your Trader Name? (Your shop or business name)' },
+  { phase: 'askStoreAddress', botMessage: 'What is the Address of your store?' },
+  { phase: 'askWholesale', botMessage: 'Which Wholesale Store did you purchase Champions from?\n\nTap a store below or type the name:' },
+  { phase: 'askPhone', botMessage: 'Almost done! 📱\n\nWhat is your Phone Number? (e.g. 0821234567)' },
+  { phase: 'confirmDetails', botMessage: 'Let me confirm your details:' },
+  { phase: 'askSlip', botMessage: '✅ Your entry has been registered!\n\nNow please upload your till slip! 📸\n\nTake a photo or upload an image of your receipt showing the Champion products purchase.\n\nTap the 📎 button below to upload your slip.' },
 ];
 
-// ─── Confetti Particle Component ───
+// ─── Utility ───
+function generateId() {
+  return Math.random().toString(36).substring(2, 11);
+}
+
+function formatTime(date: Date) {
+  return date.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+function isValidDob(dob: string): boolean {
+  const regex = /^\d{2}\/\d{2}\/\d{4}$/;
+  if (!regex.test(dob)) return false;
+  const [dd, mm, yyyy] = dob.split('/').map(Number);
+  if (mm < 1 || mm > 12) return false;
+  if (dd < 1 || dd > 31) return false;
+  if (yyyy < 1900 || yyyy > new Date().getFullYear()) return false;
+  return true;
+}
+
+function formatPhone(value: string) {
+  const digits = value.replace(/\D/g, '');
+  return digits.slice(0, 11);
+}
+
+// ─── Typing Indicator ───
+function TypingIndicator() {
+  return (
+    <div className="flex items-end gap-2 mb-2">
+      <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: BRAND.gold }}>
+        <Trophy size={16} className="text-white" />
+      </div>
+      <div
+        className="px-4 py-3 rounded-2xl rounded-bl-sm max-w-[80%] shadow-sm"
+        style={{ background: BRAND.botBubble }}
+      >
+        <div className="flex gap-1.5 items-center h-5">
+          {[0, 1, 2].map((i) => (
+            <motion.div
+              key={i}
+              className="w-2 h-2 rounded-full"
+              style={{ background: '#999' }}
+              animate={{ y: [0, -6, 0] }}
+              transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.15, ease: 'easeInOut' }}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Chat Bubble ───
+function ChatBubble({ message, onOptionSelect }: { message: ChatMessage; onOptionSelect?: (option: string) => void }) {
+  const isBot = message.from === 'bot';
+  const isUser = message.from === 'user';
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+      className={`flex items-end gap-2 mb-2 ${isUser ? 'justify-end' : 'justify-start'}`}
+    >
+      {isBot && (
+        <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-sm" style={{ background: BRAND.gold }}>
+          <Trophy size={16} className="text-white" />
+        </div>
+      )}
+
+      <div
+        className={`px-4 py-2.5 rounded-2xl max-w-[80%] shadow-sm ${
+          isBot ? 'rounded-bl-sm' : 'rounded-br-sm'
+        }`}
+        style={{ background: isBot ? BRAND.botBubble : BRAND.userBubble }}
+      >
+        {/* Text content */}
+        {message.type === 'typing' ? (
+          <div className="flex gap-1.5 items-center h-5">
+            {[0, 1, 2].map((i) => (
+              <motion.div
+                key={i}
+                className="w-2 h-2 rounded-full"
+                style={{ background: '#999' }}
+                animate={{ y: [0, -6, 0] }}
+                transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.15, ease: 'easeInOut' }}
+              />
+            ))}
+          </div>
+        ) : (
+          <div>
+            <p className="text-sm leading-relaxed whitespace-pre-line" style={{ color: isBot ? BRAND.text : '#1a1a1a' }}>
+              {message.text}
+            </p>
+
+            {/* Image preview */}
+            {message.imageUrl && (
+              <div className="mt-2 rounded-lg overflow-hidden">
+                <img src={message.imageUrl} alt="Till slip" className="w-full max-h-48 object-contain" style={{ background: '#f5f5f5' }} />
+              </div>
+            )}
+
+            {/* Details summary */}
+            {message.type === 'details' && message.details && (
+              <div className="mt-2 p-3 rounded-lg space-y-1.5" style={{ background: BRAND.cream }}>
+                {Object.entries(message.details).map(([key, value]) => (
+                  <div key={key} className="flex justify-between text-xs">
+                    <span style={{ color: '#888' }}>{key}</span>
+                    <span className="font-semibold" style={{ color: BRAND.text }}>{value}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Store options */}
+            {message.type === 'options' && message.options && (
+              <div className="mt-2 flex flex-col gap-1.5">
+                {message.options.map((opt) => (
+                  <button
+                    key={opt}
+                    onClick={() => onOptionSelect?.(opt)}
+                    className="text-left px-3 py-2 rounded-lg text-sm font-medium transition-all hover:shadow-md active:scale-95"
+                    style={{ background: BRAND.cream, color: BRAND.goldDark, border: `1px solid ${BRAND.gold}30` }}
+                  >
+                    <Store size={14} className="inline mr-2" style={{ color: BRAND.gold }} />
+                    {opt}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Result card */}
+            {message.type === 'result' && message.resultData && (
+              <div className="mt-2 p-3 rounded-lg space-y-2" style={{ background: message.resultData.result === 'confirmed' ? '#F0FFF4' : message.resultData.result === 'rejected' ? '#FFF5F5' : BRAND.cream }}>
+                {message.resultData.storeName && (
+                  <div className="flex justify-between text-xs">
+                    <span style={{ color: '#666' }}>Store</span>
+                    <span className="font-semibold" style={{ color: BRAND.text }}>{message.resultData.storeName}</span>
+                  </div>
+                )}
+                {message.resultData.slipDate && (
+                  <div className="flex justify-between text-xs">
+                    <span style={{ color: '#666' }}>Date</span>
+                    <span className="font-semibold" style={{ color: BRAND.text }}>{message.resultData.slipDate}</span>
+                  </div>
+                )}
+                {message.resultData.slipAmount && (
+                  <div className="flex justify-between text-xs">
+                    <span style={{ color: '#666' }}>Amount</span>
+                    <span className="font-semibold" style={{ color: BRAND.text }}>R{message.resultData.slipAmount}</span>
+                  </div>
+                )}
+                {message.resultData.championProducts?.length > 0 && (
+                  <div className="text-xs">
+                    <span style={{ color: '#666' }}>Products: </span>
+                    <span className="font-semibold" style={{ color: BRAND.gold }}>{message.resultData.championProducts.join(', ')}</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Timestamp */}
+        <p className={`text-[10px] mt-1 ${isUser ? 'text-right' : 'text-left'}`} style={{ color: BRAND.timeColor }}>
+          {formatTime(message.timestamp)}
+          {isUser && <CheckCircle2 size={12} className="inline ml-1" style={{ color: '#4FC3F7' }} />}
+        </p>
+      </div>
+
+      {isUser && (
+        <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-sm" style={{ background: '#6B7280' }}>
+          <User size={16} className="text-white" />
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+// ─── Confetti ───
 function ConfettiParticle({ delay, color }: { delay: number; color: string }) {
   const x = Math.random() * 100;
   const rotation = Math.random() * 360;
@@ -117,30 +300,20 @@ function ConfettiParticle({ delay, color }: { delay: number; color: string }) {
   return (
     <motion.div
       initial={{ opacity: 1, y: 0, x: `${x}vw`, rotate: 0, scale }}
-      animate={{
-        opacity: [1, 1, 0],
-        y: [0, Math.random() * 80 + 20 + 'vh'],
-        x: [`${x}vw`, `${x + (Math.random() * 20 - 10)}vw`],
-        rotate: [0, rotation * 3],
-        scale: [scale, scale * 0.5],
-      }}
+      animate={{ opacity: [1, 1, 0], y: [0, Math.random() * 80 + 20 + 'vh'], x: [`${x}vw`, `${x + (Math.random() * 20 - 10)}vw`], rotate: [0, rotation * 3], scale: [scale, scale * 0.5] }}
       transition={{ duration: 3, delay, ease: 'easeOut' }}
       className="fixed pointer-events-none z-50"
       style={{ color }}
     >
-      <motion.div
-        animate={{ rotate: [0, 360] }}
-        transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
-      >
+      <motion.div animate={{ rotate: [0, 360] }} transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}>
         {Math.random() > 0.5 ? <Star size={16} fill="currentColor" /> : <Sparkles size={14} />}
       </motion.div>
     </motion.div>
   );
 }
 
-// ─── Confetti Burst ───
 function ConfettiBurst() {
-  const colors = ['#D97706', '#F59E0B', '#92400E', '#3D2B1F', '#FFD700', '#FF6B35'];
+  const colors = ['#D97706', '#F59E0B', '#92400E', '#25D366', '#FFD700', '#FF6B35'];
   return (
     <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
       {Array.from({ length: 40 }).map((_, i) => (
@@ -150,241 +323,322 @@ function ConfettiBurst() {
   );
 }
 
-// ─── Step Indicator ───
-function StepIndicator({ currentStep }: { currentStep: Step }) {
-  const currentIndex = STEP_ORDER.indexOf(currentStep);
-
-  return (
-    <div className="w-full px-4 py-3" style={{ background: 'rgba(250,243,227,0.95)' }}>
-      <div className="flex items-center justify-between max-w-md mx-auto">
-        {STEP_ORDER.map((step, idx) => {
-          const isActive = idx === currentIndex;
-          const isCompleted = idx < currentIndex;
-          const isFuture = idx > currentIndex;
-
-          return (
-            <React.Fragment key={step}>
-              <div className="flex flex-col items-center gap-1 min-w-[44px]">
-                <motion.div
-                  animate={{
-                    scale: isActive ? 1.3 : 1,
-                    backgroundColor: isCompleted || isActive ? BRAND_COLORS.gold : '#E5DDD0',
-                  }}
-                  transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-xs shadow-md"
-                >
-                  {isCompleted ? (
-                    <CheckCircle2 size={16} />
-                  ) : (
-                    <span>{idx + 1}</span>
-                  )}
-                </motion.div>
-                <span
-                  className="text-xs font-medium text-center leading-tight"
-                  style={{
-                    color: isActive ? BRAND_COLORS.gold : isCompleted ? BRAND_COLORS.text : '#999',
-                  }}
-                >
-                  {STEP_LABELS[step]}
-                </span>
-              </div>
-              {idx < STEP_ORDER.length - 1 && (
-                <motion.div
-                  animate={{
-                    backgroundColor: isCompleted ? BRAND_COLORS.gold : '#E5DDD0',
-                  }}
-                  className="h-0.5 w-6 flex-shrink-0 rounded-full"
-                />
-              )}
-            </React.Fragment>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ─── Validation Loading Animation ───
-function ValidationAnimation() {
-  const [stageIndex, setStageIndex] = useState(0);
-  const [progress, setProgress] = useState(0);
-
-  useEffect(() => {
-    let totalDuration = 0;
-    const timeouts: NodeJS.Timeout[] = [];
-
-    VALIDATION_STAGES.forEach((stage, idx) => {
-      const startProgress = (idx / VALIDATION_STAGES.length) * 100;
-      const endProgress = ((idx + 1) / VALIDATION_STAGES.length) * 100;
-
-      timeouts.push(
-        setTimeout(() => {
-          setStageIndex(idx);
-          setProgress(startProgress);
-        }, totalDuration)
-      );
-
-      // Animate progress within each stage
-      const increments = 10;
-      for (let i = 1; i <= increments; i++) {
-        timeouts.push(
-          setTimeout(() => {
-            setProgress(startProgress + (endProgress - startProgress) * (i / increments));
-          }, totalDuration + (stage.duration / increments) * i)
-        );
-      }
-
-      totalDuration += stage.duration;
-    });
-
-    timeouts.push(
-      setTimeout(() => {
-        setProgress(100);
-      }, totalDuration)
-    );
-
-    return () => timeouts.forEach(clearTimeout);
-  }, []);
-
-  const currentStage = VALIDATION_STAGES[stageIndex];
-
-  return (
-    <div className="flex flex-col items-center gap-6 py-8">
-      <motion.div
-        animate={{ rotate: 360 }}
-        transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
-        className="w-20 h-20 rounded-full flex items-center justify-center"
-        style={{ background: `linear-gradient(135deg, ${BRAND_COLORS.gold}, ${BRAND_COLORS.goldLight})` }}
-      >
-        <motion.div
-          animate={{ scale: [1, 1.2, 1] }}
-          transition={{ duration: 1.5, repeat: Infinity }}
-          className="text-white"
-        >
-          {currentStage ? <currentStage.icon size={36} /> : <ScanLine size={36} />}
-        </motion.div>
-      </motion.div>
-
-      <div className="w-full max-w-xs">
-        <Progress value={progress} className="h-3" />
-      </div>
-
-      <motion.p
-        key={stageIndex}
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -10 }}
-        className="text-lg font-semibold"
-        style={{ color: BRAND_COLORS.text }}
-      >
-        {currentStage?.label || 'Finalizing...'}
-      </motion.p>
-
-      <p className="text-sm" style={{ color: '#888' }}>
-        Our AI is verifying your till slip
-      </p>
-
-      {/* Animated receipt scanning visual */}
-      <div className="relative w-64 h-40 rounded-lg overflow-hidden" style={{ background: '#f5f5f5' }}>
-        <motion.div
-          animate={{ y: [-10, 140, -10] }}
-          transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-          className="absolute left-0 right-0 h-2"
-          style={{ background: `linear-gradient(90deg, transparent, ${BRAND_COLORS.gold}, transparent)` }}
-        />
-        {/* Fake receipt lines */}
-        <div className="flex flex-col gap-2 p-4 opacity-40">
-          <div className="h-1 w-3/4 rounded" style={{ background: BRAND_COLORS.text }} />
-          <div className="h-1 w-1/2 rounded" style={{ background: BRAND_COLORS.text }} />
-          <div className="h-1 w-2/3 rounded" style={{ background: BRAND_COLORS.gold }} />
-          <div className="h-1 w-1/3 rounded" style={{ background: BRAND_COLORS.text }} />
-          <div className="h-1 w-1/2 rounded" style={{ background: BRAND_COLORS.gold }} />
-          <div className="h-1 w-2/5 rounded" style={{ background: BRAND_COLORS.text }} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Page Transition Wrapper ───
-const pageVariants = {
-  initial: { opacity: 0, x: 50, scale: 0.95 },
-  animate: { opacity: 1, x: 0, scale: 1 },
-  exit: { opacity: 0, x: -50, scale: 0.95 },
-};
-
-const pageTransition = {
-  type: 'spring' as const,
-  stiffness: 300,
-  damping: 30,
-};
-
 // ─── Main Component ───
-export default function ChampionCompetitionPage() {
-  // State
-  const [step, setStep] = useState<Step>('landing');
+export default function ChampionChatPage() {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [phase, setPhase] = useState<ChatPhase>('greeting');
+  const [inputValue, setInputValue] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [showConfetti, setShowConfetti] = useState(false);
+
+  // Form data collected during chat
+  const [dateOfBirth, setDateOfBirth] = useState('');
   const [firstName, setFirstName] = useState('');
   const [surname, setSurname] = useState('');
-  const [dateOfBirth, setDateOfBirth] = useState('');
   const [traderName, setTraderName] = useState('');
   const [storeAddress, setStoreAddress] = useState('');
   const [wholesaleStore, setWholesaleStore] = useState('');
   const [phone, setPhone] = useState('');
   const [stores, setStores] = useState<ParticipatingStore[]>([]);
-  const [storesLoading, setStoresLoading] = useState(false);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [imageBase64, setImageBase64] = useState<string | null>(null);
+
+  // Entry & validation data
   const [entryData, setEntryData] = useState<EntryData | null>(null);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showConfetti, setShowConfetti] = useState(false);
-  const [validationTimer, setValidationTimer] = useState(0);
+  const [showStoreDropdown, setShowStoreDropdown] = useState(false);
 
+  const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  // ─── Fetch Stores ───
+  // ─── Auto-scroll to bottom ───
+  const scrollToBottom = useCallback(() => {
+    setTimeout(() => {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+  }, []);
+
   useEffect(() => {
-    if (step === 'register' && stores.length === 0) {
-      setStoresLoading(true);
-      fetch('/api/stores')
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.stores) {
-            setStores(data.stores);
-          }
-        })
-        .catch(() => {
-          // silently fail — dropdown will be empty but form still works
-        })
-        .finally(() => {
-          setStoresLoading(false);
-        });
-    }
-  }, [step, stores.length]);
+    scrollToBottom();
+  }, [messages, isTyping, scrollToBottom]);
 
-  // ─── File Processing ───
-  const processFile = useCallback((file: File) => {
-    if (!file.type.startsWith('image/')) {
-      setError('Please upload an image file (JPG, PNG, etc.)');
+  // ─── Add bot message with typing delay ───
+  const addBotMessage = useCallback(async (text: string, type?: ChatMessage['type'], extra?: Partial<ChatMessage>) => {
+    setIsTyping(true);
+    // Simulate typing delay (1-2 seconds)
+    const delay = 800 + Math.random() * 800;
+    await new Promise(resolve => setTimeout(resolve, delay));
+    setIsTyping(false);
+
+    const msg: ChatMessage = {
+      id: generateId(),
+      from: 'bot',
+      text,
+      timestamp: new Date(),
+      type: type || 'text',
+      ...extra,
+    };
+    setMessages(prev => [...prev, msg]);
+    return msg;
+  }, []);
+
+  // ─── Add user message ───
+  const addUserMessage = useCallback((text: string, type?: ChatMessage['type'], extra?: Partial<ChatMessage>) => {
+    const msg: ChatMessage = {
+      id: generateId(),
+      from: 'user',
+      text,
+      timestamp: new Date(),
+      type: type || 'text',
+      ...extra,
+    };
+    setMessages(prev => [...prev, msg]);
+  }, []);
+
+  // ─── Fetch stores ───
+  useEffect(() => {
+    fetch('/api/stores')
+      .then(res => res.json())
+      .then(data => {
+        if (data.stores) setStores(data.stores);
+      })
+      .catch(() => {});
+  }, []);
+
+  // ─── Start the conversation ───
+  useEffect(() => {
+    if (messages.length === 0) {
+      // Kick off the greeting
+      const timer = setTimeout(() => {
+        addBotMessage(CHAT_FLOW[0].botMessage);
+        setPhase('askDob');
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Advance conversation after bot messages ───
+  const advancePhase = useCallback((currentPhase: ChatPhase) => {
+    const nextFlows: Record<ChatPhase, { phase: ChatPhase; botMessage: string } | null> = {
+      greeting: CHAT_FLOW[1], // askDob
+      askDob: CHAT_FLOW[2],   // askFirstName
+      askFirstName: CHAT_FLOW[3], // askSurname
+      askSurname: CHAT_FLOW[4],   // askTraderName
+      askTraderName: CHAT_FLOW[5], // askStoreAddress
+      askStoreAddress: CHAT_FLOW[6], // askWholesale
+      askWholesale: CHAT_FLOW[7],   // askPhone
+      askPhone: null, // will do confirmDetails
+      confirmDetails: CHAT_FLOW[9], // askSlip
+      askSlip: null,
+      validating: null,
+      resultConfirmed: null,
+      resultRejected: null,
+      resultDuplicate: null,
+      startOver: null,
+    };
+
+    const next = nextFlows[currentPhase];
+    if (next) {
+      setPhase(next.phase);
+      if (next.phase === 'askWholesale' && stores.length > 0) {
+        addBotMessage(next.botMessage, 'options', { options: stores.map(s => s.name) });
+      } else {
+        addBotMessage(next.botMessage);
+      }
+    }
+  }, [addBotMessage, stores]);
+
+  // ─── Handle user text input ───
+  const handleSend = useCallback(async () => {
+    const value = inputValue.trim();
+    if (!value && phase !== 'askSlip') return;
+
+    setInputValue('');
+    setError(null);
+
+    // Handle store option tap (already selected via onOptionSelect)
+    // This handles free-text input for stores
+    if (phase === 'askWholesale') {
+      setWholesaleStore(value);
+      addUserMessage(value);
+      // Then ask phone
+      setPhase('askPhone');
+      await addBotMessage(CHAT_FLOW[7].botMessage);
       return;
     }
 
+    // Phase-specific handling
+    switch (phase) {
+      case 'askDob':
+        if (!isValidDob(value)) {
+          addUserMessage(value);
+          await addBotMessage('⚠️ That doesn\'t look like a valid date. Please enter your Date of Birth in DD/MM/YYYY format (e.g. 15/03/1985)');
+          return;
+        }
+        setDateOfBirth(value);
+        addUserMessage(value);
+        advancePhase('askDob');
+        break;
+
+      case 'askFirstName':
+        setFirstName(value);
+        addUserMessage(value);
+        advancePhase('askFirstName');
+        break;
+
+      case 'askSurname':
+        setSurname(value);
+        addUserMessage(value);
+        advancePhase('askSurname');
+        break;
+
+      case 'askTraderName':
+        setTraderName(value);
+        addUserMessage(value);
+        advancePhase('askTraderName');
+        break;
+
+      case 'askStoreAddress':
+        setStoreAddress(value);
+        addUserMessage(value);
+        advancePhase('askStoreAddress');
+        break;
+
+      case 'askPhone':
+        const digits = value.replace(/\D/g, '');
+        if (digits.length < 10) {
+          addUserMessage(value);
+          await addBotMessage('⚠️ Please enter a valid phone number with at least 10 digits (e.g. 0821234567)');
+          return;
+        }
+        setPhone(digits);
+        addUserMessage(digits);
+        // Confirm details
+        setPhase('confirmDetails');
+        await addBotMessage('Let me confirm your details:', 'details', {
+          details: {
+            'Date of Birth': dateOfBirth,
+            'First Name': firstName,
+            'Surname': surname,
+            'Trader Name': traderName,
+            'Store Address': storeAddress,
+            'Wholesale Store': wholesaleStore,
+            'Phone': digits,
+          },
+        });
+        await addBotMessage('Are these details correct? Type "yes" to confirm or "no" to start over.');
+        break;
+
+      case 'confirmDetails':
+        if (value.toLowerCase() === 'yes' || value.toLowerCase() === 'y') {
+          addUserMessage('Yes, that\'s correct! ✅');
+          // Register the entry
+          setIsSubmitting(true);
+          try {
+            const response = await fetch('/api/competition/entry', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                firstName,
+                surname,
+                dateOfBirth,
+                consumerPhone: phone,
+                traderName,
+                storeAddress,
+                wholesaleStore,
+              }),
+            });
+            if (!response.ok) {
+              const data = await response.json();
+              throw new Error(data.error || 'Registration failed');
+            }
+            const data = await response.json();
+            const entry = data.entry || data;
+            setEntryData({
+              id: entry.id,
+              entryNumber: String(entry.entryNumber),
+              firstName,
+              surname,
+              traderName,
+              storeAddress,
+              wholesaleStore,
+              consumerPhone: phone,
+              dateOfBirth,
+            });
+            // Ask for slip upload
+            setPhase('askSlip');
+            await addBotMessage(`✅ Your entry has been registered! Entry #${entry.entryNumber}\n\nNow please upload your till slip! 📸\n\nTap the 📎 button below to take a photo or upload your receipt.`, 'text');
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : 'Something went wrong';
+            await addBotMessage(`❌ Oops! ${msg}\n\nPlease try again.`);
+          } finally {
+            setIsSubmitting(false);
+          }
+        } else {
+          addUserMessage('No, let me start over.');
+          await addBotMessage('No worries! Let\'s start fresh. 🔄\n\nWhat is your Date of Birth? (DD/MM/YYYY)');
+          setDateOfBirth('');
+          setFirstName('');
+          setSurname('');
+          setTraderName('');
+          setStoreAddress('');
+          setWholesaleStore('');
+          setPhone('');
+          setPhase('askDob');
+        }
+        break;
+
+      case 'resultConfirmed':
+        if (value.toLowerCase().includes('again') || value.toLowerCase().includes('new')) {
+          handleStartOver();
+        } else {
+          addUserMessage(value);
+          await addBotMessage('🎉 You\'re all set! Keep buying Champion Toffees for more chances to win!\n\nType "again" to enter with a new slip.');
+        }
+        break;
+
+      case 'resultRejected':
+      case 'resultDuplicate':
+        addUserMessage(value);
+        await addBotMessage('🔄 Want to try again with a different slip? Type "try again" or tap the 📎 button to upload a new one.');
+        setPhase('askSlip');
+        break;
+
+      default:
+        addUserMessage(value);
+        break;
+    }
+  }, [inputValue, phase, dateOfBirth, firstName, surname, traderName, storeAddress, wholesaleStore, phone, stores, addBotMessage, addUserMessage, advancePhase, isSubmitting, entryData]);
+
+  // ─── Handle store option tap ───
+  const handleStoreSelect = useCallback(async (storeName: string) => {
+    setWholesaleStore(storeName);
+    addUserMessage(storeName);
+    setPhase('askPhone');
+    await addBotMessage(CHAT_FLOW[7].botMessage);
+  }, [addBotMessage, addUserMessage]);
+
+  // ─── Handle image upload ───
+  const processFile = useCallback((file: File) => {
+    if (!file.type.startsWith('image/')) {
+      setError('Please upload an image file');
+      return;
+    }
     if (file.size > 10 * 1024 * 1024) {
       setError('Image must be less than 10MB');
       return;
     }
-
     setError(null);
-
     const reader = new FileReader();
     reader.onload = (e) => {
       const result = e.target?.result as string;
       setImagePreview(result);
-      // Extract base64 without the data URL prefix
-      const base64Data = result.split(',')[1];
-      setImageBase64(base64Data);
+      const base64 = result.split(',')[1];
+      setImageBase64(base64);
     };
     reader.readAsDataURL(file);
   }, []);
@@ -399,121 +653,25 @@ export default function ChampionCompetitionPage() {
     if (file) processFile(file);
   }, [processFile]);
 
-  const removeImage = useCallback(() => {
-    setImagePreview(null);
-    setImageBase64(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    if (cameraInputRef.current) cameraInputRef.current.value = '';
-  }, []);
-
-  // ─── Validate DOB format ───
-  const isValidDobFormat = (dob: string): boolean => {
-    const regex = /^\d{2}\/\d{2}\/\d{4}$/;
-    if (!regex.test(dob)) return false;
-    const [dd, mm, yyyy] = dob.split('/').map(Number);
-    if (mm < 1 || mm > 12) return false;
-    if (dd < 1 || dd > 31) return false;
-    if (yyyy < 1900 || yyyy > new Date().getFullYear()) return false;
-    return true;
-  };
-
-  // ─── Registration Submit ───
-  const handleRegister = useCallback(async () => {
-    if (!firstName.trim()) {
-      setError('Please enter your first name');
-      return;
-    }
-    if (!surname.trim()) {
-      setError('Please enter your surname');
-      return;
-    }
-    if (!dateOfBirth.trim() || !isValidDobFormat(dateOfBirth.trim())) {
-      setError('Please enter a valid date of birth in DD/MM/YYYY format');
-      return;
-    }
-    if (!phone.trim() || phone.trim().length < 10) {
-      setError('Please enter a valid phone number (at least 10 digits)');
-      return;
-    }
-    if (!traderName.trim()) {
-      setError('Please enter your trader/shop name');
-      return;
-    }
-    if (!storeAddress.trim()) {
-      setError('Please enter your store address');
-      return;
-    }
-    if (!wholesaleStore) {
-      setError('Please select the wholesale store you purchased Champions from');
-      return;
-    }
-
-    setError(null);
-    setIsSubmitting(true);
-
-    try {
-      const response = await fetch('/api/competition/entry', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          firstName: firstName.trim(),
-          surname: surname.trim(),
-          dateOfBirth: dateOfBirth.trim(),
-          consumerPhone: phone.trim(),
-          traderName: traderName.trim(),
-          storeAddress: storeAddress.trim(),
-          wholesaleStore,
-        }),
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Registration failed. Please try again.');
-      }
-
-      const data = await response.json();
-      const entry = data.entry || data;
-      setEntryData({
-        id: entry.id,
-        entryNumber: String(entry.entryNumber),
-        firstName: firstName.trim(),
-        surname: surname.trim(),
-        traderName: traderName.trim(),
-        storeAddress: storeAddress.trim(),
-        wholesaleStore,
-        consumerPhone: phone.trim(),
-        dateOfBirth: dateOfBirth.trim(),
-      });
-
-      setStep('upload');
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Something went wrong. Please try again.';
-      setError(message);
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [firstName, surname, dateOfBirth, phone, traderName, storeAddress, wholesaleStore]);
-
-  // ─── Upload & Validate ───
-  const handleUploadAndValidate = useCallback(async () => {
+  // ─── Submit slip for validation ───
+  const handleSubmitSlip = useCallback(async () => {
     if (!imageBase64) {
-      setError('Please capture or upload a till slip photo');
+      await addBotMessage('⚠️ Please upload a photo of your till slip first. Tap the 📎 button below.');
       return;
     }
     if (!entryData?.id) {
-      setError('No entry found. Please register first.');
+      await addBotMessage('⚠️ No entry found. Please confirm your details first.');
       return;
     }
 
-    setError(null);
-    setIsSubmitting(true);
-    setStep('validating');
-    setValidationTimer(0);
+    // Show the user's slip in chat
+    addUserMessage('Here\'s my till slip 📸', 'image', { imageUrl: imagePreview || undefined });
 
-    // Start a visual timer
-    const timerInterval = setInterval(() => {
-      setValidationTimer((prev) => prev + 100);
-    }, 100);
+    setIsSubmitting(true);
+    setPhase('validating');
+
+    // Show validating message
+    await addBotMessage('🔍 Analyzing your till slip...\n\nOur AI is checking:\n• Is this a valid receipt?\n• Is it from a participating store?\n• Does it show Champion products?\n• Is it authentic?', 'typing');
 
     try {
       const response = await fetch('/api/competition/upload', {
@@ -527,53 +685,59 @@ export default function ChampionCompetitionPage() {
 
       if (!response.ok) {
         const data = await response.json();
-        throw new Error(data.error || 'Validation failed. Please try again.');
+        throw new Error(data.error || 'Validation failed');
       }
 
       const data = await response.json();
-      setValidationResult(data);
+      const validation: ValidationResult = data.validation || data;
+      setValidationResult(validation);
 
-      // Wait for validation animation to complete (minimum 5 seconds visual)
-      const elapsed = validationTimer;
-      const remaining = Math.max(0, 5000 - elapsed);
-      await new Promise((resolve) => setTimeout(resolve, remaining));
+      // Add typing delay to simulate processing
+      setIsTyping(true);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      setIsTyping(false);
 
-      clearInterval(timerInterval);
-      setStep('result');
-    } catch (err: unknown) {
-      clearInterval(timerInterval);
-      const message = err instanceof Error ? err.message : 'Validation failed. Please try again.';
-      setError(message);
-      setStep('upload');
+      if (validation.result === 'confirmed') {
+        setPhase('resultConfirmed');
+        setShowConfetti(true);
+        setTimeout(() => setShowConfetti(false), 4000);
+        await addBotMessage(
+          `🎉 Congratulations! Your entry has been CONFIRMED! ✅\n\nEntry #${entryData.entryNumber}\n\nYour Champion Toffees purchase has been verified from ${validation.storeName || 'a participating store'}.`,
+          'result',
+          { resultData: validation }
+        );
+        await addBotMessage(
+          `🏆 You're now eligible to win amazing prizes!\n\n• Prize draws happen weekly\n• Winners are notified via SMS\n• Keep buying Champion Toffees for more chances!\n\nType "again" to enter with a new slip, or share this with friends!`
+        );
+      } else if (validation.result === 'duplicate') {
+        setPhase('resultDuplicate');
+        await addBotMessage(
+          `⚠️ Duplicate Entry Detected\n\n${validation.reason || 'This till slip has already been submitted.'}\n\nEach till slip can only be used once. Please try again with a different receipt.`,
+          'result',
+          { resultData: validation }
+        );
+      } else {
+        setPhase('resultRejected');
+        await addBotMessage(
+          `❌ Entry Not Valid\n\n${validation.reason || 'No Champion products found on this receipt.'}\n\nPlease make sure your slip shows Champion Toffees purchased from a participating store.`,
+          'result',
+          { resultData: validation }
+        );
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Validation failed';
+      await addBotMessage(`❌ Oops! ${msg}\n\nPlease try uploading your slip again.`);
+      setPhase('askSlip');
     } finally {
       setIsSubmitting(false);
     }
-  }, [imageBase64, entryData, validationTimer]);
+  }, [imageBase64, imagePreview, entryData, addBotMessage, addUserMessage]);
 
-  // ─── Handle Result Continue ───
-  const handleResultContinue = useCallback(() => {
-    if (validationResult?.result === 'confirmed') {
-      setShowConfetti(true);
-      setStep('confirmed');
-      setTimeout(() => setShowConfetti(false), 4000);
-    }
-  }, [validationResult]);
-
-  // ─── Reset & Try Again ───
-  const handleTryAgain = useCallback(() => {
-    setImagePreview(null);
-    setImageBase64(null);
-    setValidationResult(null);
-    setError(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    if (cameraInputRef.current) cameraInputRef.current.value = '';
-    setStep('upload');
-  }, []);
-
-  const handleStartOver = useCallback(() => {
+  // ─── Start Over ───
+  const handleStartOver = useCallback(async () => {
+    setDateOfBirth('');
     setFirstName('');
     setSurname('');
-    setDateOfBirth('');
     setTraderName('');
     setStoreAddress('');
     setWholesaleStore('');
@@ -586,1065 +750,232 @@ export default function ChampionCompetitionPage() {
     setShowConfetti(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (cameraInputRef.current) cameraInputRef.current.value = '';
-    setStep('landing');
+    setMessages([]);
+    setPhase('greeting');
   }, []);
 
-  // ─── Format Phone ───
-  const formatPhone = (value: string) => {
-    const digits = value.replace(/\D/g, '');
-    return digits.slice(0, 11);
-  };
-
-  // ─── Render Steps ───
-  const renderLanding = () => (
-    <motion.div
-      key="landing"
-      variants={pageVariants}
-      initial="initial"
-      animate="animate"
-      exit="exit"
-      transition={pageTransition}
-      className="flex flex-col items-center w-full"
-    >
-      {/* Hero Section */}
-      <div className="relative w-full overflow-hidden rounded-2xl mb-8" style={{ background: `linear-gradient(135deg, ${BRAND_COLORS.goldDark}, ${BRAND_COLORS.gold}, ${BRAND_COLORS.goldLight})` }}>
-        <div className="absolute inset-0 opacity-20">
-          <motion.div
-            animate={{ rotate: [0, 360] }}
-            transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
-            className="absolute top-4 right-4"
-          >
-            <Star size={80} fill="rgba(255,255,255,0.3)" stroke="none" />
-          </motion.div>
-          <motion.div
-            animate={{ rotate: [360, 0] }}
-            transition={{ duration: 15, repeat: Infinity, ease: 'linear' }}
-            className="absolute bottom-4 left-4"
-          >
-            <Sparkles size={60} color="rgba(255,255,255,0.3)" />
-          </motion.div>
-        </div>
-
-        <div className="flex flex-col items-center py-12 px-6 text-center relative z-10">
-          <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ type: 'spring', stiffness: 200, delay: 0.2 }}
-            className="w-24 h-24 rounded-full flex items-center justify-center mb-4 shadow-lg"
-            style={{ background: BRAND_COLORS.cream }}
-          >
-            <Trophy size={48} style={{ color: BRAND_COLORS.gold }} />
-          </motion.div>
-
-          <motion.h1
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-            className="text-4xl md:text-5xl font-bold text-white mb-2"
-          >
-            Champion Toffees
-          </motion.h1>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.5 }}
-            className="text-2xl md:text-3xl font-bold text-white mb-4 tracking-wide"
-          >
-            Buy, Snap, Win!
-          </motion.div>
-
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.7 }}
-            className="text-white/90 text-lg max-w-sm"
-          >
-            Purchase Champion Toffees, snap your till slip, and win amazing prizes!
-          </motion.p>
-        </div>
-      </div>
-
-      {/* How It Works */}
-      <div className="w-full max-w-lg mb-8">
-        <h2 className="text-xl font-bold mb-6 text-center" style={{ color: BRAND_COLORS.text }}>
-          How It Works
-        </h2>
-        <div className="flex flex-col gap-4">
-          {[
-            { icon: ShoppingCart, title: 'Buy Champion Toffees', desc: 'Purchase any Champion Toffees product from a participating wholesale store', color: BRAND_COLORS.gold },
-            { icon: Camera, title: 'Snap Your Till Slip', desc: 'Take a photo of your receipt showing the Champion product purchase', color: BRAND_COLORS.goldLight },
-            { icon: Gift, title: 'Win Amazing Prizes', desc: 'Our AI validates your entry instantly — confirmed entries win!', color: BRAND_COLORS.goldDark },
-          ].map((item, idx) => (
-            <motion.div
-              key={idx}
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.8 + idx * 0.15 }}
-            >
-              <Card className="border-0 shadow-md" style={{ background: BRAND_COLORS.cream }}>
-                <CardContent className="flex items-center gap-4 p-4">
-                  <div
-                    className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0"
-                    style={{ background: item.color }}
-                  >
-                    <item.icon size={24} className="text-white" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-base" style={{ color: BRAND_COLORS.text }}>
-                      {item.title}
-                    </h3>
-                    <p className="text-sm" style={{ color: '#888' }}>
-                      {item.desc}
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          ))}
-        </div>
-      </div>
-
-      {/* Trust Signals */}
-      <div className="w-full max-w-lg mb-8">
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            { icon: ShieldCheck, label: 'AI Verified', color: BRAND_COLORS.gold },
-            { icon: Zap, label: 'Instant Validation', color: BRAND_COLORS.goldLight },
-            { icon: Star, label: 'Fair Play', color: BRAND_COLORS.goldDark },
-          ].map((item, idx) => (
-            <motion.div
-              key={idx}
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 1.0 + idx * 0.1 }}
-              className="flex flex-col items-center gap-2 p-4 rounded-xl"
-              style={{ background: BRAND_COLORS.cream }}
-            >
-              <item.icon size={28} style={{ color: item.color }} />
-              <span className="text-xs font-bold text-center" style={{ color: BRAND_COLORS.text }}>
-                {item.label}
-              </span>
-            </motion.div>
-          ))}
-        </div>
-      </div>
-
-      {/* Enter Button */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 1.2 }}
-        className="w-full max-w-lg"
-      >
-        <Button
-          onClick={() => { setError(null); setStep('register'); }}
-          size="lg"
-          className="w-full h-14 text-lg font-bold shadow-lg hover:shadow-xl transition-shadow"
-          style={{
-            background: `linear-gradient(135deg, ${BRAND_COLORS.gold}, ${BRAND_COLORS.goldLight})`,
-            color: 'white',
-          }}
-        >
-          Enter Competition Now
-          <ArrowRight size={20} className="ml-2" />
-        </Button>
-      </motion.div>
-    </motion.div>
-  );
-
-  const renderRegister = () => (
-    <motion.div
-      key="register"
-      variants={pageVariants}
-      initial="initial"
-      animate="animate"
-      exit="exit"
-      transition={pageTransition}
-      className="flex flex-col items-center w-full max-w-lg mx-auto"
-    >
-      <Card className="w-full border-0 shadow-lg" style={{ background: BRAND_COLORS.cream }}>
-        <CardHeader className="text-center pb-2">
-          <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ type: 'spring', delay: 0.1 }}
-            className="w-16 h-16 rounded-full mx-auto mb-3 flex items-center justify-center"
-            style={{ background: BRAND_COLORS.gold }}
-          >
-            <User size={32} className="text-white" />
-          </motion.div>
-          <CardTitle className="text-2xl" style={{ color: BRAND_COLORS.text }}>
-            Register Your Entry
-          </CardTitle>
-          <CardDescription className="text-base" style={{ color: '#888' }}>
-            Fill in your details to enter the competition
-          </CardDescription>
-        </CardHeader>
-
-        <CardContent className="flex flex-col gap-5 px-6">
-          {/* Date of Birth */}
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="dob" className="font-semibold" style={{ color: BRAND_COLORS.text }}>
-              <CalendarDays size={16} className="inline mr-2" />
-              Date of Birth (DD/MM/YYYY)
-            </Label>
-            <Input
-              id="dob"
-              placeholder="e.g. 15/03/1985"
-              value={dateOfBirth}
-              onChange={(e) => setDateOfBirth(e.target.value)}
-              className="h-12 text-base"
-              style={{ borderColor: BRAND_COLORS.gold + '40' }}
-            />
-          </div>
-
-          {/* First Name */}
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="firstName" className="font-semibold" style={{ color: BRAND_COLORS.text }}>
-              <User size={16} className="inline mr-2" />
-              First Name
-            </Label>
-            <Input
-              id="firstName"
-              placeholder="Enter your first name"
-              value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
-              className="h-12 text-base"
-              style={{ borderColor: BRAND_COLORS.gold + '40' }}
-            />
-          </div>
-
-          {/* Surname */}
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="surname" className="font-semibold" style={{ color: BRAND_COLORS.text }}>
-              <User size={16} className="inline mr-2" />
-              Surname
-            </Label>
-            <Input
-              id="surname"
-              placeholder="Enter your surname"
-              value={surname}
-              onChange={(e) => setSurname(e.target.value)}
-              className="h-12 text-base"
-              style={{ borderColor: BRAND_COLORS.gold + '40' }}
-            />
-          </div>
-
-          {/* Phone */}
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="phone" className="font-semibold" style={{ color: BRAND_COLORS.text }}>
-              <Phone size={16} className="inline mr-2" />
-              Phone Number
-            </Label>
-            <Input
-              id="phone"
-              type="tel"
-              placeholder="e.g. 0821234567"
-              value={phone}
-              onChange={(e) => setPhone(formatPhone(e.target.value))}
-              className="h-12 text-base"
-              style={{ borderColor: BRAND_COLORS.gold + '40' }}
-            />
-          </div>
-
-          {/* Trader Name */}
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="traderName" className="font-semibold" style={{ color: BRAND_COLORS.text }}>
-              <Store size={16} className="inline mr-2" />
-              Trader Name (Shop / Business Name)
-            </Label>
-            <Input
-              id="traderName"
-              placeholder="Enter your shop or business name"
-              value={traderName}
-              onChange={(e) => setTraderName(e.target.value)}
-              className="h-12 text-base"
-              style={{ borderColor: BRAND_COLORS.gold + '40' }}
-            />
-          </div>
-
-          {/* Address of Store */}
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="storeAddress" className="font-semibold" style={{ color: BRAND_COLORS.text }}>
-              <Home size={16} className="inline mr-2" />
-              Address of Store
-            </Label>
-            <Input
-              id="storeAddress"
-              placeholder="Enter your store address"
-              value={storeAddress}
-              onChange={(e) => setStoreAddress(e.target.value)}
-              className="h-12 text-base"
-              style={{ borderColor: BRAND_COLORS.gold + '40' }}
-            />
-          </div>
-
-          {/* Wholesale Store Dropdown */}
-          <div className="flex flex-col gap-2">
-            <Label className="font-semibold" style={{ color: BRAND_COLORS.text }}>
-              <Store size={16} className="inline mr-2" />
-              Wholesale Store You Purchased Champions From
-            </Label>
-            <Select value={wholesaleStore} onValueChange={setWholesaleStore} disabled={storesLoading}>
-              <SelectTrigger className="h-12 text-base w-full" style={{ borderColor: BRAND_COLORS.gold + '40' }}>
-                <SelectValue placeholder={storesLoading ? 'Loading stores...' : 'Select the wholesale store'} />
-              </SelectTrigger>
-              <SelectContent className="max-h-64">
-                {stores.map((store) => (
-                  <SelectItem key={store.id} value={store.name}>{store.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Error */}
-          {error && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="flex items-center gap-2 p-3 rounded-lg bg-red-50 text-red-700 text-sm"
-            >
-              <AlertTriangle size={16} />
-              {error}
-            </motion.div>
-          )}
-        </CardContent>
-
-        <CardFooter className="flex flex-col gap-3 px-6 pt-4">
-          <Button
-            onClick={handleRegister}
-            disabled={isSubmitting}
-            size="lg"
-            className="w-full h-12 font-bold shadow-md"
-            style={{
-              background: `linear-gradient(135deg, ${BRAND_COLORS.gold}, ${BRAND_COLORS.goldLight})`,
-              color: 'white',
-            }}
-          >
-            {isSubmitting ? (
-              <>
-                <Loader2 size={20} className="animate-spin" />
-                Registering...
-              </>
-            ) : (
-              <>
-                Continue to Upload Slip
-                <ArrowRight size={18} className="ml-2" />
-              </>
-            )}
-          </Button>
-
-          <Button
-            variant="ghost"
-            onClick={() => { setError(null); setStep('landing'); }}
-            className="w-full"
-            style={{ color: BRAND_COLORS.text }}
-          >
-            <ArrowLeft size={16} className="mr-2" />
-            Back
-          </Button>
-        </CardFooter>
-      </Card>
-    </motion.div>
-  );
-
-  const renderUpload = () => (
-    <motion.div
-      key="upload"
-      variants={pageVariants}
-      initial="initial"
-      animate="animate"
-      exit="exit"
-      transition={pageTransition}
-      className="flex flex-col items-center w-full max-w-lg mx-auto"
-    >
-      <Card className="w-full border-0 shadow-lg" style={{ background: BRAND_COLORS.cream }}>
-        <CardHeader className="text-center pb-2">
-          <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ type: 'spring', delay: 0.1 }}
-            className="w-16 h-16 rounded-full mx-auto mb-3 flex items-center justify-center"
-            style={{ background: BRAND_COLORS.gold }}
-          >
-            <Camera size={32} className="text-white" />
-          </motion.div>
-          <CardTitle className="text-2xl" style={{ color: BRAND_COLORS.text }}>
-            Upload Your Till Slip
-          </CardTitle>
-          <CardDescription className="text-base" style={{ color: '#888' }}>
-            Take a photo or upload an image of your receipt
-          </CardDescription>
-        </CardHeader>
-
-        <CardContent className="flex flex-col gap-5 px-6">
-          {/* Entry info badge */}
-          <div className="flex items-center justify-center gap-2 p-3 rounded-lg" style={{ background: BRAND_COLORS.gold + '15' }}>
-            <FileText size={16} style={{ color: BRAND_COLORS.gold }} />
-            <span className="text-sm font-semibold" style={{ color: BRAND_COLORS.gold }}>
-              Entry: {entryData?.entryNumber || '—'}
-            </span>
-            <Badge variant="outline" className="text-xs" style={{ borderColor: BRAND_COLORS.gold, color: BRAND_COLORS.gold }}>
-              {entryData?.firstName} {entryData?.surname}
-            </Badge>
-          </div>
-
-          {/* Image Preview */}
-          {imagePreview ? (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="relative rounded-xl overflow-hidden shadow-md"
-            >
-              <img
-                src={imagePreview}
-                alt="Till slip preview"
-                className="w-full h-auto max-h-64 object-contain"
-                style={{ background: '#f0f0f0' }}
-              />
-              <div className="absolute top-2 right-2 flex gap-2">
-                <Badge className="shadow-sm" style={{ background: BRAND_COLORS.gold, color: 'white' }}>
-                  <CheckCircle2 size={14} className="mr-1" />
-                  Ready
-                </Badge>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={removeImage}
-                  className="h-7 w-7 p-0 rounded-full"
-                >
-                  <XCircle size={14} />
-                </Button>
-              </div>
-            </motion.div>
-          ) : (
-            <div
-              className="flex flex-col items-center justify-center gap-4 p-8 rounded-xl border-2 border-dashed"
-              style={{ borderColor: BRAND_COLORS.gold + '40', background: '#fff' }}
-            >
-              <ImageIcon size={48} style={{ color: BRAND_COLORS.gold + '60' }} />
-              <p className="text-sm" style={{ color: '#888' }}>
-                No image selected — capture or upload below
-              </p>
-            </div>
-          )}
-
-          {/* Upload Buttons */}
-          <div className="grid grid-cols-2 gap-3">
-            <Button
-              onClick={() => cameraInputRef.current?.click()}
-              variant="outline"
-              size="lg"
-              className="h-12 font-semibold"
-              style={{ borderColor: BRAND_COLORS.gold, color: BRAND_COLORS.gold }}
-            >
-              <Camera size={20} className="mr-2" />
-              Take Photo
-            </Button>
-            <Button
-              onClick={() => fileInputRef.current?.click()}
-              variant="outline"
-              size="lg"
-              className="h-12 font-semibold"
-              style={{ borderColor: BRAND_COLORS.gold, color: BRAND_COLORS.gold }}
-            >
-              <Upload size={20} className="mr-2" />
-              Upload File
-            </Button>
-          </div>
-
-          {/* Hidden inputs */}
-          <input
-            ref={cameraInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            onChange={handleCameraCapture}
-            className="hidden"
-          />
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            onChange={handleFileUpload}
-            className="hidden"
-          />
-
-          {/* Tips */}
-          <div className="p-4 rounded-xl" style={{ background: '#fff' }}>
-            <h3 className="font-bold text-sm mb-2" style={{ color: BRAND_COLORS.text }}>
-              Tips for a clear photo:
-            </h3>
-            <ul className="text-xs space-y-1" style={{ color: '#666' }}>
-              <li className="flex items-center gap-2">
-                <ChevronRight size={14} style={{ color: BRAND_COLORS.gold }} />
-                Ensure the receipt is flat and well-lit
-              </li>
-              <li className="flex items-center gap-2">
-                <ChevronRight size={14} style={{ color: BRAND_COLORS.gold }} />
-                Include the store name, date, and total amount
-              </li>
-              <li className="flex items-center gap-2">
-                <ChevronRight size={14} style={{ color: BRAND_COLORS.gold }} />
-                Champion Toffees product must be visible on the slip
-              </li>
-            </ul>
-          </div>
-
-          {/* Error */}
-          {error && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="flex items-center gap-2 p-3 rounded-lg bg-red-50 text-red-700 text-sm"
-            >
-              <AlertTriangle size={16} />
-              {error}
-            </motion.div>
-          )}
-        </CardContent>
-
-        <CardFooter className="flex flex-col gap-3 px-6 pt-4">
-          <Button
-            onClick={handleUploadAndValidate}
-            disabled={isSubmitting || !imageBase64}
-            size="lg"
-            className="w-full h-12 font-bold shadow-md"
-            style={{
-              background: `linear-gradient(135deg, ${BRAND_COLORS.gold}, ${BRAND_COLORS.goldLight})`,
-              color: 'white',
-              opacity: isSubmitting || !imageBase64 ? 0.7 : 1,
-            }}
-          >
-            {isSubmitting ? (
-              <>
-                <Loader2 size={20} className="animate-spin" />
-                Validating...
-              </>
-            ) : (
-              <>
-                Validate My Slip
-                <ShieldCheck size={18} className="ml-2" />
-              </>
-            )}
-          </Button>
-
-          <Button
-            variant="ghost"
-            onClick={() => { setError(null); setStep('register'); }}
-            className="w-full"
-            style={{ color: BRAND_COLORS.text }}
-          >
-            <ArrowLeft size={16} className="mr-2" />
-            Back to Registration
-          </Button>
-        </CardFooter>
-      </Card>
-    </motion.div>
-  );
-
-  const renderValidating = () => (
-    <motion.div
-      key="validating"
-      variants={pageVariants}
-      initial="initial"
-      animate="animate"
-      exit="exit"
-      transition={pageTransition}
-      className="flex flex-col items-center w-full max-w-lg mx-auto"
-    >
-      <Card className="w-full border-0 shadow-lg" style={{ background: BRAND_COLORS.cream }}>
-        <CardHeader className="text-center pb-2">
-          <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ type: 'spring', delay: 0.1 }}
-            className="w-16 h-16 rounded-full mx-auto mb-3 flex items-center justify-center"
-            style={{ background: BRAND_COLORS.gold }}
-          >
-            <ScanLine size={32} className="text-white" />
-          </motion.div>
-          <CardTitle className="text-2xl" style={{ color: BRAND_COLORS.text }}>
-            Validating Your Entry
-          </CardTitle>
-          <CardDescription className="text-base" style={{ color: '#888' }}>
-            Our AI is checking your till slip
-          </CardDescription>
-        </CardHeader>
-
-        <CardContent className="px-6">
-          <ValidationAnimation />
-        </CardContent>
-      </Card>
-    </motion.div>
-  );
-
-  const renderResult = () => {
-    if (!validationResult) return null;
-
-    const isConfirmed = validationResult.result === 'confirmed';
-    const isRejected = validationResult.result === 'rejected';
-    const isDuplicate = validationResult.result === 'duplicate';
-
-    const resultConfig = {
-      confirmed: {
-        icon: CircleCheck,
-        title: 'Entry Confirmed!',
-        description: 'Your Champion Toffees purchase has been verified',
-        color: '#16A34A',
-        bg: '#F0FFF4',
-      },
-      rejected: {
-        icon: Ban,
-        title: 'Entry Not Valid',
-        description: validationResult.reason || 'No Champion products found on this receipt',
-        color: '#DC2626',
-        bg: '#FFF5F5',
-      },
-      duplicate: {
-        icon: Fingerprint,
-        title: 'Duplicate Entry',
-        description: validationResult.reason || 'This receipt has already been submitted',
-        color: BRAND_COLORS.gold,
-        bg: BRAND_COLORS.cream,
-      },
-    };
-
-    const config = resultConfig[validationResult.result];
-
-    return (
-      <motion.div
-        key="result"
-        variants={pageVariants}
-        initial="initial"
-        animate="animate"
-        exit="exit"
-        transition={pageTransition}
-        className="flex flex-col items-center w-full max-w-lg mx-auto"
-      >
-        <Card className="w-full border-0 shadow-lg" style={{ background: config.bg }}>
-          <CardHeader className="text-center pb-2">
-            <motion.div
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              transition={{ type: 'spring', delay: 0.2 }}
-              className="w-20 h-20 rounded-full mx-auto mb-4 flex items-center justify-center shadow-lg"
-              style={{ background: config.color }}
-            >
-              <config.icon size={40} className="text-white" />
-            </motion.div>
-            <CardTitle className="text-2xl" style={{ color: config.color }}>
-              {config.title}
-            </CardTitle>
-            <CardDescription className="text-base" style={{ color: '#666' }}>
-              {config.description}
-            </CardDescription>
-          </CardHeader>
-
-          <CardContent className="flex flex-col gap-4 px-6">
-            {/* Validation Details */}
-            <div className="p-4 rounded-xl space-y-3" style={{ background: '#fff' }}>
-              {validationResult.storeName && (
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium" style={{ color: '#666' }}>Store</span>
-                  <span className="text-sm font-bold" style={{ color: BRAND_COLORS.text }}>
-                    {validationResult.storeName}
-                  </span>
-                </div>
-              )}
-              {validationResult.slipDate && (
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium" style={{ color: '#666' }}>Date</span>
-                  <span className="text-sm font-bold" style={{ color: BRAND_COLORS.text }}>
-                    {validationResult.slipDate}
-                  </span>
-                </div>
-              )}
-              {validationResult.slipAmount && (
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium" style={{ color: '#666' }}>Amount</span>
-                  <span className="text-sm font-bold" style={{ color: BRAND_COLORS.text }}>
-                    R{validationResult.slipAmount}
-                  </span>
-                </div>
-              )}
-              {validationResult.championProducts?.length > 0 && (
-                <div className="flex flex-col gap-2">
-                  <span className="text-sm font-medium" style={{ color: '#666' }}>Champion Products Found</span>
-                  <div className="flex flex-wrap gap-2">
-                    {validationResult.championProducts.map((product, idx) => (
-                      <Badge key={idx} variant="outline" className="text-xs" style={{ borderColor: BRAND_COLORS.gold, color: BRAND_COLORS.gold }}>
-                        {product}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {validationResult.confidence > 0 && (
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium" style={{ color: '#666' }}>Confidence</span>
-                  <div className="flex items-center gap-2">
-                    <Progress value={validationResult.confidence * 100} className="w-20 h-2" />
-                    <span className="text-sm font-bold" style={{ color: BRAND_COLORS.gold }}>
-                      {Math.round(validationResult.confidence * 100)}%
-                    </span>
-                  </div>
-                </div>
-              )}
-              {validationResult.isFraud && (
-                <div className="flex items-center gap-2 p-2 rounded-lg bg-red-50 text-red-700 text-xs">
-                  <AlertTriangle size={14} />
-                  Fraud detection: This slip appears to be altered or fabricated
-                </div>
-              )}
-            </div>
-
-            {/* Entry Number */}
-            {isConfirmed && entryData?.entryNumber && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.4 }}
-                className="p-4 rounded-xl text-center"
-                style={{ background: `linear-gradient(135deg, ${BRAND_COLORS.gold}, ${BRAND_COLORS.goldLight})` }}
-              >
-                <p className="text-white/80 text-sm mb-1">Your Entry Number</p>
-                <p className="text-white text-2xl font-bold">{entryData.entryNumber}</p>
-              </motion.div>
-            )}
-          </CardContent>
-
-          <CardFooter className="flex flex-col gap-3 px-6 pt-4">
-            {isConfirmed ? (
-              <Button
-                onClick={handleResultContinue}
-                size="lg"
-                className="w-full h-12 font-bold shadow-md"
-                style={{
-                  background: `linear-gradient(135deg, #16A34A, #22C55E)`,
-                  color: 'white',
-                }}
-              >
-                <PartyPopper size={18} className="mr-2" />
-                View My Prize Entry
-              </Button>
-            ) : (
-              <Button
-                onClick={handleTryAgain}
-                size="lg"
-                className="w-full h-12 font-bold shadow-md"
-                style={{
-                  background: `linear-gradient(135deg, ${BRAND_COLORS.gold}, ${BRAND_COLORS.goldLight})`,
-                  color: 'white',
-                }}
-              >
-                <RefreshCw size={18} className="mr-2" />
-                Try Again with New Slip
-              </Button>
-            )}
-
-            <Button
-              variant="ghost"
-              onClick={handleStartOver}
-              className="w-full"
-              style={{ color: BRAND_COLORS.text }}
-            >
-              <ArrowLeft size={16} className="mr-2" />
-              Start Over
-            </Button>
-          </CardFooter>
-        </Card>
-      </motion.div>
-    );
-  };
-
-  const renderConfirmed = () => (
-    <motion.div
-      key="confirmed"
-      variants={pageVariants}
-      initial="initial"
-      animate="animate"
-      exit="exit"
-      transition={pageTransition}
-      className="flex flex-col items-center w-full max-w-lg mx-auto"
-    >
-      {showConfetti && <ConfettiBurst />}
-
-      <Card className="w-full border-0 shadow-lg overflow-hidden" style={{ background: BRAND_COLORS.cream }}>
-        {/* Celebration header */}
-        <div className="relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${BRAND_COLORS.goldDark}, ${BRAND_COLORS.gold}, ${BRAND_COLORS.goldLight})` }}>
-          <div className="flex flex-col items-center py-10 px-6 text-center relative z-10">
-            <motion.div
-              initial={{ scale: 0, rotate: -180 }}
-              animate={{ scale: 1, rotate: 0 }}
-              transition={{ type: 'spring', stiffness: 200, damping: 15, delay: 0.2 }}
-              className="mb-4"
-            >
-              <Trophy size={64} className="text-white" />
-            </motion.div>
-
-            <motion.h2
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.5 }}
-              className="text-3xl font-bold text-white mb-2"
-            >
-              You&apos;re In!
-            </motion.h2>
-
-            <motion.p
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.7 }}
-              className="text-white/90 text-lg"
-            >
-              Your entry has been confirmed and you&apos;re eligible to win!
-            </motion.p>
-          </div>
-
-          {/* Animated sparkles */}
-          <motion.div
-            animate={{ rotate: 360 }}
-            transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
-            className="absolute -top-4 -right-4 opacity-30"
-          >
-            <Star size={100} fill="white" stroke="none" />
-          </motion.div>
-          <motion.div
-            animate={{ rotate: -360 }}
-            transition={{ duration: 15, repeat: Infinity, ease: 'linear' }}
-            className="absolute -bottom-4 -left-4 opacity-20"
-          >
-            <Sparkles size={80} color="white" />
-          </motion.div>
-        </div>
-
-        <CardContent className="flex flex-col gap-5 px-6 pt-6">
-          {/* Entry Number Card */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.8 }}
-            className="p-6 rounded-xl text-center border-2"
-            style={{ borderColor: BRAND_COLORS.gold, background: '#fff' }}
-          >
-            <p className="text-sm font-medium mb-2" style={{ color: '#888' }}>
-              Your Competition Entry Number
-            </p>
-            <p
-              className="text-4xl font-bold mb-4"
-              style={{ color: BRAND_COLORS.gold }}
-            >
-              {entryData?.entryNumber || '—'}
-            </p>
-
-            <div className="flex justify-center gap-3">
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-9"
-                style={{ borderColor: BRAND_COLORS.gold, color: BRAND_COLORS.gold }}
-                onClick={() => {
-                  navigator.clipboard.writeText(entryData?.entryNumber || '');
-                }}
-              >
-                <Copy size={14} className="mr-1" />
-                Copy
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-9"
-                style={{ borderColor: BRAND_COLORS.gold, color: BRAND_COLORS.gold }}
-              >
-                <Share2 size={14} className="mr-1" />
-                Share
-              </Button>
-            </div>
-          </motion.div>
-
-          {/* Entry Details */}
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 1.0 }}
-            className="p-4 rounded-xl space-y-2"
-            style={{ background: '#fff' }}
-          >
-            <h3 className="font-bold text-sm" style={{ color: BRAND_COLORS.text }}>
-              Entry Details
-            </h3>
-            <div className="space-y-2 text-sm">
-              <div className="flex items-center justify-between">
-                <span style={{ color: '#888' }}>Name</span>
-                <span className="font-medium" style={{ color: BRAND_COLORS.text }}>
-                  {entryData?.firstName} {entryData?.surname}
-                </span>
-              </div>
-              {entryData?.dateOfBirth && (
-                <div className="flex items-center justify-between">
-                  <span style={{ color: '#888' }}>Date of Birth</span>
-                  <span className="font-medium" style={{ color: BRAND_COLORS.text }}>
-                    {entryData.dateOfBirth}
-                  </span>
-                </div>
-              )}
-              <div className="flex items-center justify-between">
-                <span style={{ color: '#888' }}>Phone</span>
-                <span className="font-medium" style={{ color: BRAND_COLORS.text }}>
-                  {entryData?.consumerPhone}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span style={{ color: '#888' }}>Trader Name</span>
-                <span className="font-medium" style={{ color: BRAND_COLORS.text }}>
-                  {entryData?.traderName}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span style={{ color: '#888' }}>Store Address</span>
-                <span className="font-medium" style={{ color: BRAND_COLORS.text }}>
-                  {entryData?.storeAddress}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span style={{ color: '#888' }}>Wholesale Store</span>
-                <span className="font-medium" style={{ color: BRAND_COLORS.text }}>
-                  {entryData?.wholesaleStore}
-                </span>
-              </div>
-              {validationResult?.championProducts && validationResult.championProducts.length > 0 && (
-                <div className="flex items-center justify-between">
-                  <span style={{ color: '#888' }}>Products</span>
-                  <div className="flex flex-wrap gap-1">
-                    {validationResult.championProducts.map((p, i) => (
-                      <Badge key={i} variant="outline" className="text-xs" style={{ borderColor: BRAND_COLORS.gold, color: BRAND_COLORS.gold }}>
-                        {p}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </motion.div>
-
-          {/* What happens next */}
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 1.2 }}
-            className="p-4 rounded-xl"
-            style={{ background: BRAND_COLORS.gold + '15' }}
-          >
-            <h3 className="font-bold text-sm mb-2" style={{ color: BRAND_COLORS.gold }}>
-              What happens next?
-            </h3>
-            <ul className="text-sm space-y-2" style={{ color: BRAND_COLORS.text }}>
-              <li className="flex items-center gap-2">
-                <Clock size={16} style={{ color: BRAND_COLORS.gold }} />
-                Prize draws happen weekly
-              </li>
-              <li className="flex items-center gap-2">
-                <Phone size={16} style={{ color: BRAND_COLORS.gold }} />
-                Winners are notified via SMS
-              </li>
-              <li className="flex items-center gap-2">
-                <Gift size={16} style={{ color: BRAND_COLORS.gold }} />
-                Keep buying Champion Toffees for more chances!
-              </li>
-            </ul>
-          </motion.div>
-        </CardContent>
-
-        <CardFooter className="flex flex-col gap-3 px-6 pt-4 pb-6">
-          <Button
-            onClick={handleStartOver}
-            size="lg"
-            className="w-full h-12 font-bold shadow-md"
-            style={{
-              background: `linear-gradient(135deg, ${BRAND_COLORS.gold}, ${BRAND_COLORS.goldLight})`,
-              color: 'white',
-            }}
-          >
-            <Sparkles size={18} className="mr-2" />
-            Enter Again with New Slip
-          </Button>
-
-          <p className="text-xs text-center" style={{ color: '#888' }}>
-            Each till slip can only be used once. Buy more Champion Toffees for additional entries!
-          </p>
-        </CardFooter>
-      </Card>
-    </motion.div>
-  );
-
-  // ─── Determine Which Step to Render ───
-  const renderStep = () => {
-    switch (step) {
-      case 'landing': return renderLanding();
-      case 'register': return renderRegister();
-      case 'upload': return renderUpload();
-      case 'validating': return renderValidating();
-      case 'result': return renderResult();
-      case 'confirmed': return renderConfirmed();
-      default: return renderLanding();
+  // ─── Determine input placeholder ───
+  const getInputPlaceholder = () => {
+    switch (phase) {
+      case 'askDob': return 'DD/MM/YYYY';
+      case 'askFirstName': return 'Your first name...';
+      case 'askSurname': return 'Your surname...';
+      case 'askTraderName': return 'Your shop/business name...';
+      case 'askStoreAddress': return 'Your store address...';
+      case 'askWholesale': return 'Type store name or tap above...';
+      case 'askPhone': return 'e.g. 0821234567';
+      case 'confirmDetails': return 'Type "yes" or "no"...';
+      case 'askSlip': return 'Tap 📎 to upload your slip...';
+      case 'resultConfirmed': return 'Type "again" for new entry...';
+      case 'resultRejected': return 'Type "try again"...';
+      case 'resultDuplicate': return 'Type "try again"...';
+      default: return 'Type a message...';
     }
   };
 
+  // ─── Can user type? ───
+  const canType = !['validating', 'greeting'].includes(phase) && !isSubmitting && !isTyping;
+
+  // ─── Show attachment button? ───
+  const showAttach = phase === 'askSlip' || phase === 'resultRejected' || phase === 'resultDuplicate';
+
+  // ─── Show send button? ───
+  const showSend = canType && phase !== 'askSlip';
+
+  // ─── Auto-submit slip when image is selected ───
+  useEffect(() => {
+    if (imageBase64 && phase === 'askSlip' && entryData?.id && !isSubmitting) {
+      handleSubmitSlip();
+    }
+  }, [imageBase64]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ─── Main Render ───
   return (
-    <div
-      className="min-h-screen flex flex-col"
-      style={{ background: BRAND_COLORS.bg }}
-    >
-      {/* Header */}
-      <header className="sticky top-0 z-40 shadow-sm" style={{ background: BRAND_COLORS.text }}>
-        <div className="flex items-center justify-between px-4 py-3 max-w-lg mx-auto w-full">
-          <div className="flex items-center gap-2">
-            <div
-              className="w-8 h-8 rounded-full flex items-center justify-center"
-              style={{ background: BRAND_COLORS.gold }}
-            >
-              <Trophy size={18} className="text-white" />
-            </div>
-            <span className="text-white font-bold text-lg">Champion Toffees</span>
+    <div className="h-screen flex flex-col overflow-hidden" style={{ background: BRAND.bg }}>
+      {showConfetti && <ConfettiBurst />}
+
+      {/* ─── WhatsApp-style Header ─── */}
+      <header className="flex-shrink-0 shadow-md z-40" style={{ background: BRAND.headerBg }}>
+        <div className="flex items-center gap-3 px-4 py-3">
+          <div className="w-10 h-10 rounded-full flex items-center justify-center shadow-sm" style={{ background: BRAND.gold }}>
+            <Trophy size={20} className="text-white" />
           </div>
-          {step !== 'landing' && (
-            <Badge
-              className="text-xs font-semibold"
-              style={{ background: BRAND_COLORS.gold, color: 'white' }}
-            >
-              Step {STEP_ORDER.indexOf(step) + 1}/6
-            </Badge>
-          )}
+          <div className="flex-1 min-w-0">
+            <h1 className="text-white font-bold text-lg truncate">Champion Toffees</h1>
+            <p className="text-white/70 text-xs">
+              {isTyping ? 'typing...' : isSubmitting ? 'processing...' : phase === 'validating' ? 'validating slip...' : 'online'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {entryData && (
+              <span className="text-xs font-semibold px-2 py-1 rounded-full" style={{ background: BRAND.gold, color: 'white' }}>
+                #{entryData.entryNumber}
+              </span>
+            )}
+          </div>
         </div>
       </header>
 
-      {/* Step Indicator (show when past landing) */}
-      {step !== 'landing' && (
-        <StepIndicator currentStep={step} />
+      {/* ─── Chat Background Pattern (WhatsApp-style) ─── */}
+      <div
+        className="flex-1 overflow-y-auto relative"
+        style={{
+          background: `${BRAND.bg}`,
+          backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%239C92AC' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zm6-30V0h-2v4H6v2h4v4h2V6h4V4h-4z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
+        }}
+      >
+        {/* ─── Date Separator ─── */}
+        <div className="flex justify-center py-3 px-4 sticky top-0 z-10">
+          <span className="text-xs px-3 py-1 rounded-lg shadow-sm font-medium" style={{ background: '#E1E1E1', color: '#666' }}>
+            Today
+          </span>
+        </div>
+
+        {/* ─── Encrypted Notice ─── */}
+        <div className="flex justify-center pb-3 px-4">
+          <span className="text-xs px-3 py-1 rounded-lg text-center" style={{ background: '#FFECD2', color: BRAND.goldDark }}>
+            <ShieldCheck size={12} className="inline mr-1" />
+            Messages are secured. Your info stays private.
+          </span>
+        </div>
+
+        {/* ─── Messages ─── */}
+        <div className="px-3 pb-4">
+          {messages.map((msg) => (
+            <ChatBubble
+              key={msg.id}
+              message={msg}
+              onOptionSelect={phase === 'askWholesale' ? handleStoreSelect : undefined}
+            />
+          ))}
+
+          {/* Typing indicator */}
+          {isTyping && <TypingIndicator />}
+        </div>
+
+        {/* Scroll anchor */}
+        <div ref={chatEndRef} />
+      </div>
+
+      {/* ─── Image Preview Bar (before submission) ─── */}
+      <AnimatePresence>
+        {imagePreview && phase === 'askSlip' && !isSubmitting && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="flex-shrink-0 border-t overflow-hidden"
+            style={{ background: '#fff', borderColor: '#ddd' }}
+          >
+            <div className="flex items-center gap-3 px-4 py-3">
+              <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0" style={{ background: '#f5f5f5' }}>
+                <img src={imagePreview} alt="Slip preview" className="w-full h-full object-cover" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold truncate" style={{ color: BRAND.text }}>Till slip ready</p>
+                <p className="text-xs" style={{ color: '#888' }}>Tap send to validate</p>
+              </div>
+              <button
+                onClick={() => { setImagePreview(null); setImageBase64(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
+                className="p-2 rounded-full"
+                style={{ color: BRAND.errorRed }}
+              >
+                <XCircle size={20} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ─── Error Bar ─── */}
+      {error && (
+        <div className="flex-shrink-0 px-4 py-2 flex items-center gap-2" style={{ background: '#FFF5F5' }}>
+          <AlertTriangle size={16} style={{ color: BRAND.errorRed }} />
+          <span className="text-sm" style={{ color: BRAND.errorRed }}>{error}</span>
+        </div>
       )}
 
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col items-center px-4 py-6 max-w-lg mx-auto w-full">
-        <AnimatePresence mode="wait">
-          {renderStep()}
-        </AnimatePresence>
-      </main>
+      {/* ─── Input Bar (WhatsApp-style) ─── */}
+      <div className="flex-shrink-0 border-t z-40" style={{ background: BRAND.inputBg }}>
+        <div className="flex items-center gap-2 px-3 py-2">
+          {/* Attachment button */}
+          {showAttach && (
+            <>
+              <button
+                onClick={() => cameraInputRef.current?.click()}
+                className="p-2 rounded-full transition-colors hover:bg-gray-200"
+                style={{ color: BRAND.headerBg }}
+                title="Take Photo"
+              >
+                <Camera size={22} />
+              </button>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="p-2 rounded-full transition-colors hover:bg-gray-200"
+                style={{ color: BRAND.headerBg }}
+                title="Upload File"
+              >
+                <Paperclip size={22} />
+              </button>
+              {/* Hidden inputs */}
+              <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleCameraCapture} className="hidden" />
+              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
+            </>
+          )}
 
-      {/* Footer */}
-      <footer
-        className="mt-auto py-4 px-4 text-center"
-        style={{ background: BRAND_COLORS.text }}
-      >
-        <p className="text-white/70 text-xs">
-          Champion Toffees &quot;Buy, Snap, Win!&quot; Competition • AI-Verified • Fair Play Guaranteed
-        </p>
-        <p className="text-white/50 text-xs mt-1">
-          © 2026 Champion Sweets SA. All rights reserved.
-        </p>
-      </footer>
+          {/* Text input */}
+          <div className="flex-1 relative">
+            <input
+              ref={inputRef}
+              type="text"
+              value={inputValue}
+              onChange={(e) => {
+                if (phase === 'askPhone') {
+                  setInputValue(formatPhone(e.target.value));
+                } else {
+                  setInputValue(e.target.value);
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && inputValue.trim() && canType) {
+                  handleSend();
+                }
+              }}
+              placeholder={getInputPlaceholder()}
+              disabled={!canType}
+              className="w-full px-4 py-2.5 rounded-full text-sm outline-none shadow-sm transition-all"
+              style={{
+                background: '#fff',
+                color: BRAND.text,
+                opacity: canType ? 1 : 0.6,
+              }}
+            />
+          </div>
+
+          {/* Send / Submit button */}
+          {showSend && inputValue.trim() ? (
+            <button
+              onClick={handleSend}
+              className="p-2.5 rounded-full transition-all shadow-sm"
+              style={{ background: BRAND.headerBg, color: 'white' }}
+            >
+              <Send size={20} />
+            </button>
+          ) : phase === 'askSlip' && imageBase64 && !isSubmitting ? (
+            <button
+              onClick={handleSubmitSlip}
+              className="p-2.5 rounded-full transition-all shadow-sm"
+              style={{ background: BRAND.green, color: 'white' }}
+            >
+              <Send size={20} />
+            </button>
+          ) : (
+            <div className="p-2.5 rounded-full" style={{ background: '#ddd', color: '#999' }}>
+              <Send size={20} />
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -121,20 +121,20 @@
   }
 }
 
-/* Custom scrollbar styling */
+/* WhatsApp-style chat scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 4px;
+  height: 4px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(217, 119, 6, 0.25);
-  border-radius: 3px;
+  background: rgba(7, 94, 84, 0.2);
+  border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(217, 119, 6, 0.4);
+  background: rgba(7, 94, 84, 0.4);
 }
 
 /* Hide scrollbar for nav */
@@ -144,4 +144,15 @@
 }
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
+}
+
+/* WhatsApp chat input focus ring */
+input:focus {
+  box-shadow: 0 0 0 2px rgba(7, 94, 84, 0.15);
+}
+
+/* Smooth chat scroll */
+.chat-scroll {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
 }
