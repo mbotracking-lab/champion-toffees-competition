@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { neon } from '@neondatabase/serverless';
 import { db } from '@/lib/db';
 import ZAI from 'z-ai-web-dev-sdk';
 
@@ -26,19 +27,56 @@ function buildStoreListForPrompt(storeNames: string[]): string {
   return storeNames.map((name, i) => `${i + 1}. ${name}`).join('\n');
 }
 
-// Auto-ensure tables exist
+// Auto-ensure tables exist using neon client directly (not fetch-based)
 async function ensureTablesExist(): Promise<boolean> {
+  const dbUrl = process.env.DATABASE_URL;
+  if (!dbUrl) return false;
+
   try {
     await db.competitionEntry.count({ take: 1 });
     return true;
   } catch {
     console.log('[upload] Tables not found, running auto-setup...');
     try {
-      const setupResponse = await fetch(`${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000'}/api/setup`);
-      if (!setupResponse.ok) return false;
+      const sql = neon(dbUrl);
+      await sql`CREATE TABLE IF NOT EXISTS "CompetitionEntry" (
+        "id" TEXT NOT NULL PRIMARY KEY DEFAULT gen_random_uuid()::text,
+        "dateOfBirth" TEXT NOT NULL DEFAULT '',
+        "firstName" TEXT NOT NULL DEFAULT '',
+        "surname" TEXT NOT NULL DEFAULT '',
+        "traderName" TEXT NOT NULL DEFAULT '',
+        "storeAddress" TEXT NOT NULL DEFAULT '',
+        "wholesaleStore" TEXT NOT NULL DEFAULT '',
+        "consumerPhone" TEXT NOT NULL DEFAULT '',
+        "consumerName" TEXT NOT NULL DEFAULT '',
+        "consumerLocation" TEXT NOT NULL DEFAULT '',
+        "slipPhotoUrl" TEXT NOT NULL DEFAULT '',
+        "slipPhotoData" TEXT NOT NULL DEFAULT '',
+        "validated" BOOLEAN NOT NULL DEFAULT false,
+        "validationResult" TEXT NOT NULL DEFAULT 'pending',
+        "validationReason" TEXT NOT NULL DEFAULT '',
+        "storeName" TEXT NOT NULL DEFAULT '',
+        "slipDate" TEXT NOT NULL DEFAULT '',
+        "slipAmount" TEXT NOT NULL DEFAULT '',
+        "championProducts" TEXT NOT NULL DEFAULT '',
+        "confidenceScore" TEXT NOT NULL DEFAULT '',
+        "isDuplicate" BOOLEAN NOT NULL DEFAULT false,
+        "isFraud" BOOLEAN NOT NULL DEFAULT false,
+        "entryNumber" INTEGER NOT NULL DEFAULT 0,
+        "createdAt" TIMESTAMP NOT NULL DEFAULT now(),
+        "updatedAt" TIMESTAMP NOT NULL DEFAULT now()
+      )`;
+      await sql`CREATE TABLE IF NOT EXISTS "ParticipatingStore" (
+        "id" TEXT NOT NULL PRIMARY KEY DEFAULT gen_random_uuid()::text,
+        "name" TEXT NOT NULL UNIQUE,
+        "region" TEXT NOT NULL DEFAULT '',
+        "createdAt" TIMESTAMP NOT NULL DEFAULT now(),
+        "updatedAt" TIMESTAMP NOT NULL DEFAULT now()
+      )`;
       console.log('[upload] Auto-setup completed');
       return true;
-    } catch {
+    } catch (setupErr) {
+      console.error('[upload] Auto-setup error:', setupErr);
       return false;
     }
   }
