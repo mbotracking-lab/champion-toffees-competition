@@ -8,13 +8,17 @@ import { db } from '@/lib/db';
 export async function GET() {
   try {
     // ─── Step 1: Create database tables using raw SQL ───
-    // This ensures the schema exists even if prisma db push didn't run during build
-
     const createTableSQL = `
       CREATE TABLE IF NOT EXISTS "CompetitionEntry" (
         "id" TEXT NOT NULL PRIMARY KEY DEFAULT gen_random_uuid()::text,
-        "consumerName" TEXT NOT NULL,
+        "dateOfBirth" TEXT NOT NULL DEFAULT '',
+        "firstName" TEXT NOT NULL DEFAULT '',
+        "surname" TEXT NOT NULL DEFAULT '',
+        "traderName" TEXT NOT NULL DEFAULT '',
+        "storeAddress" TEXT NOT NULL DEFAULT '',
+        "wholesaleStore" TEXT NOT NULL DEFAULT '',
         "consumerPhone" TEXT NOT NULL DEFAULT '',
+        "consumerName" TEXT NOT NULL DEFAULT '',
         "consumerLocation" TEXT NOT NULL DEFAULT '',
         "slipPhotoUrl" TEXT NOT NULL DEFAULT '',
         "slipPhotoData" TEXT NOT NULL DEFAULT '',
@@ -32,6 +36,29 @@ export async function GET() {
         "createdAt" TIMESTAMP NOT NULL DEFAULT now(),
         "updatedAt" TIMESTAMP NOT NULL DEFAULT now()
       );
+
+      -- Add new columns if table already exists (from earlier deployment)
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'CompetitionEntry' AND column_name = 'dateOfBirth') THEN
+          ALTER TABLE "CompetitionEntry" ADD COLUMN "dateOfBirth" TEXT NOT NULL DEFAULT '';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'CompetitionEntry' AND column_name = 'firstName') THEN
+          ALTER TABLE "CompetitionEntry" ADD COLUMN "firstName" TEXT NOT NULL DEFAULT '';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'CompetitionEntry' AND column_name = 'surname') THEN
+          ALTER TABLE "CompetitionEntry" ADD COLUMN "surname" TEXT NOT NULL DEFAULT '';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'CompetitionEntry' AND column_name = 'traderName') THEN
+          ALTER TABLE "CompetitionEntry" ADD COLUMN "traderName" TEXT NOT NULL DEFAULT '';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'CompetitionEntry' AND column_name = 'storeAddress') THEN
+          ALTER TABLE "CompetitionEntry" ADD COLUMN "storeAddress" TEXT NOT NULL DEFAULT '';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'CompetitionEntry' AND column_name = 'wholesaleStore') THEN
+          ALTER TABLE "CompetitionEntry" ADD COLUMN "wholesaleStore" TEXT NOT NULL DEFAULT '';
+        END IF;
+      END $$;
 
       CREATE TABLE IF NOT EXISTS "CompetitionStats" (
         "id" TEXT NOT NULL PRIMARY KEY DEFAULT gen_random_uuid()::text,

@@ -41,6 +41,9 @@ import {
   CircleCheck,
   Ban,
   Fingerprint,
+  CalendarDays,
+  Store,
+  Home,
 } from 'lucide-react';
 
 // ─── Types ───
@@ -49,9 +52,13 @@ type Step = 'landing' | 'register' | 'upload' | 'validating' | 'result' | 'confi
 interface EntryData {
   id: string;
   entryNumber: string;
-  consumerName: string;
+  firstName: string;
+  surname: string;
+  traderName: string;
+  storeAddress: string;
+  wholesaleStore: string;
   consumerPhone: string;
-  consumerLocation: string;
+  dateOfBirth: string;
 }
 
 interface ValidationResult {
@@ -65,20 +72,13 @@ interface ValidationResult {
   isFraud: boolean;
 }
 
-// ─── Constants ───
-const CAPE_TOWN_AREAS = [
-  'Athlone', 'Bellville', 'Bishop Lavis', 'Bonteheuwel', 'Brackenfell',
-  'Cape Town CBD', 'Delft', 'Elsies River', 'Goodwood', 'Grassy Park',
-  'Hanover Park', 'Heideveld', 'Khayelitsha', 'Kraaifontein', 'Langa',
-  'Lavender Hill', 'Manenberg', 'Mitchells Plain', 'Nyanga', 'Parow',
-  'Philippi', 'Rylands', 'Salt River', 'Stenberg', 'Strand',
-  'Gugulethu', 'Wynberg', 'Muizenberg', 'Worcester', 'Paarl',
-  'Stellenbosch', 'Somerset West', 'Kuils River', 'Blue Downs', 'Eersterivier',
-  'Makhaza', 'Site B', 'Site C', 'Harare', 'Crossroads',
-  'Philippi East', 'Samora Machel', 'Barcelona', 'Vygieskraal', 'Bokmakierie',
-  'Netreg', 'Riverside', 'Macassar', 'Nomzamo', 'Lwandle',
-];
+interface ParticipatingStore {
+  id: string;
+  name: string;
+  region: string;
+}
 
+// ─── Constants ───
 const BRAND_COLORS = {
   bg: '#FAF3E3',
   text: '#3D2B1F',
@@ -323,9 +323,15 @@ const pageTransition = {
 export default function ChampionCompetitionPage() {
   // State
   const [step, setStep] = useState<Step>('landing');
-  const [name, setName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [surname, setSurname] = useState('');
+  const [dateOfBirth, setDateOfBirth] = useState('');
+  const [traderName, setTraderName] = useState('');
+  const [storeAddress, setStoreAddress] = useState('');
+  const [wholesaleStore, setWholesaleStore] = useState('');
   const [phone, setPhone] = useState('');
-  const [location, setLocation] = useState('');
+  const [stores, setStores] = useState<ParticipatingStore[]>([]);
+  const [storesLoading, setStoresLoading] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [entryData, setEntryData] = useState<EntryData | null>(null);
@@ -337,6 +343,26 @@ export default function ChampionCompetitionPage() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+
+  // ─── Fetch Stores ───
+  useEffect(() => {
+    if (step === 'register' && stores.length === 0) {
+      setStoresLoading(true);
+      fetch('/api/stores')
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.stores) {
+            setStores(data.stores);
+          }
+        })
+        .catch(() => {
+          // silently fail — dropdown will be empty but form still works
+        })
+        .finally(() => {
+          setStoresLoading(false);
+        });
+    }
+  }, [step, stores.length]);
 
   // ─── File Processing ───
   const processFile = useCallback((file: File) => {
@@ -380,18 +406,45 @@ export default function ChampionCompetitionPage() {
     if (cameraInputRef.current) cameraInputRef.current.value = '';
   }, []);
 
+  // ─── Validate DOB format ───
+  const isValidDobFormat = (dob: string): boolean => {
+    const regex = /^\d{2}\/\d{2}\/\d{4}$/;
+    if (!regex.test(dob)) return false;
+    const [dd, mm, yyyy] = dob.split('/').map(Number);
+    if (mm < 1 || mm > 12) return false;
+    if (dd < 1 || dd > 31) return false;
+    if (yyyy < 1900 || yyyy > new Date().getFullYear()) return false;
+    return true;
+  };
+
   // ─── Registration Submit ───
   const handleRegister = useCallback(async () => {
-    if (!name.trim()) {
-      setError('Please enter your name');
+    if (!firstName.trim()) {
+      setError('Please enter your first name');
+      return;
+    }
+    if (!surname.trim()) {
+      setError('Please enter your surname');
+      return;
+    }
+    if (!dateOfBirth.trim() || !isValidDobFormat(dateOfBirth.trim())) {
+      setError('Please enter a valid date of birth in DD/MM/YYYY format');
       return;
     }
     if (!phone.trim() || phone.trim().length < 10) {
       setError('Please enter a valid phone number (at least 10 digits)');
       return;
     }
-    if (!location) {
-      setError('Please select your area');
+    if (!traderName.trim()) {
+      setError('Please enter your trader/shop name');
+      return;
+    }
+    if (!storeAddress.trim()) {
+      setError('Please enter your store address');
+      return;
+    }
+    if (!wholesaleStore) {
+      setError('Please select the wholesale store you purchased Champions from');
       return;
     }
 
@@ -403,9 +456,13 @@ export default function ChampionCompetitionPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          consumerName: name.trim(),
+          firstName: firstName.trim(),
+          surname: surname.trim(),
+          dateOfBirth: dateOfBirth.trim(),
           consumerPhone: phone.trim(),
-          consumerLocation: location,
+          traderName: traderName.trim(),
+          storeAddress: storeAddress.trim(),
+          wholesaleStore,
         }),
       });
 
@@ -415,12 +472,17 @@ export default function ChampionCompetitionPage() {
       }
 
       const data = await response.json();
+      const entry = data.entry || data;
       setEntryData({
-        id: data.id,
-        entryNumber: data.entryNumber,
-        consumerName: name.trim(),
+        id: entry.id,
+        entryNumber: String(entry.entryNumber),
+        firstName: firstName.trim(),
+        surname: surname.trim(),
+        traderName: traderName.trim(),
+        storeAddress: storeAddress.trim(),
+        wholesaleStore,
         consumerPhone: phone.trim(),
-        consumerLocation: location,
+        dateOfBirth: dateOfBirth.trim(),
       });
 
       setStep('upload');
@@ -430,7 +492,7 @@ export default function ChampionCompetitionPage() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [name, phone, location]);
+  }, [firstName, surname, dateOfBirth, phone, traderName, storeAddress, wholesaleStore]);
 
   // ─── Upload & Validate ───
   const handleUploadAndValidate = useCallback(async () => {
@@ -509,9 +571,13 @@ export default function ChampionCompetitionPage() {
   }, []);
 
   const handleStartOver = useCallback(() => {
-    setName('');
+    setFirstName('');
+    setSurname('');
+    setDateOfBirth('');
+    setTraderName('');
+    setStoreAddress('');
+    setWholesaleStore('');
     setPhone('');
-    setLocation('');
     setImagePreview(null);
     setImageBase64(null);
     setEntryData(null);
@@ -606,7 +672,7 @@ export default function ChampionCompetitionPage() {
         </h2>
         <div className="flex flex-col gap-4">
           {[
-            { icon: ShoppingCart, title: 'Buy Champion Toffees', desc: 'Purchase any Champion Toffees product from a store near you', color: BRAND_COLORS.gold },
+            { icon: ShoppingCart, title: 'Buy Champion Toffees', desc: 'Purchase any Champion Toffees product from a participating wholesale store', color: BRAND_COLORS.gold },
             { icon: Camera, title: 'Snap Your Till Slip', desc: 'Take a photo of your receipt showing the Champion product purchase', color: BRAND_COLORS.goldLight },
             { icon: Gift, title: 'Win Amazing Prizes', desc: 'Our AI validates your entry instantly — confirmed entries win!', color: BRAND_COLORS.goldDark },
           ].map((item, idx) => (
@@ -717,17 +783,49 @@ export default function ChampionCompetitionPage() {
         </CardHeader>
 
         <CardContent className="flex flex-col gap-5 px-6">
-          {/* Name */}
+          {/* Date of Birth */}
           <div className="flex flex-col gap-2">
-            <Label htmlFor="name" className="font-semibold" style={{ color: BRAND_COLORS.text }}>
-              <User size={16} className="inline mr-2" />
-              Full Name
+            <Label htmlFor="dob" className="font-semibold" style={{ color: BRAND_COLORS.text }}>
+              <CalendarDays size={16} className="inline mr-2" />
+              Date of Birth (DD/MM/YYYY)
             </Label>
             <Input
-              id="name"
-              placeholder="Enter your full name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
+              id="dob"
+              placeholder="e.g. 15/03/1985"
+              value={dateOfBirth}
+              onChange={(e) => setDateOfBirth(e.target.value)}
+              className="h-12 text-base"
+              style={{ borderColor: BRAND_COLORS.gold + '40' }}
+            />
+          </div>
+
+          {/* First Name */}
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="firstName" className="font-semibold" style={{ color: BRAND_COLORS.text }}>
+              <User size={16} className="inline mr-2" />
+              First Name
+            </Label>
+            <Input
+              id="firstName"
+              placeholder="Enter your first name"
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              className="h-12 text-base"
+              style={{ borderColor: BRAND_COLORS.gold + '40' }}
+            />
+          </div>
+
+          {/* Surname */}
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="surname" className="font-semibold" style={{ color: BRAND_COLORS.text }}>
+              <User size={16} className="inline mr-2" />
+              Surname
+            </Label>
+            <Input
+              id="surname"
+              placeholder="Enter your surname"
+              value={surname}
+              onChange={(e) => setSurname(e.target.value)}
               className="h-12 text-base"
               style={{ borderColor: BRAND_COLORS.gold + '40' }}
             />
@@ -750,19 +848,51 @@ export default function ChampionCompetitionPage() {
             />
           </div>
 
-          {/* Location */}
+          {/* Trader Name */}
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="traderName" className="font-semibold" style={{ color: BRAND_COLORS.text }}>
+              <Store size={16} className="inline mr-2" />
+              Trader Name (Shop / Business Name)
+            </Label>
+            <Input
+              id="traderName"
+              placeholder="Enter your shop or business name"
+              value={traderName}
+              onChange={(e) => setTraderName(e.target.value)}
+              className="h-12 text-base"
+              style={{ borderColor: BRAND_COLORS.gold + '40' }}
+            />
+          </div>
+
+          {/* Address of Store */}
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="storeAddress" className="font-semibold" style={{ color: BRAND_COLORS.text }}>
+              <Home size={16} className="inline mr-2" />
+              Address of Store
+            </Label>
+            <Input
+              id="storeAddress"
+              placeholder="Enter your store address"
+              value={storeAddress}
+              onChange={(e) => setStoreAddress(e.target.value)}
+              className="h-12 text-base"
+              style={{ borderColor: BRAND_COLORS.gold + '40' }}
+            />
+          </div>
+
+          {/* Wholesale Store Dropdown */}
           <div className="flex flex-col gap-2">
             <Label className="font-semibold" style={{ color: BRAND_COLORS.text }}>
-              <MapPin size={16} className="inline mr-2" />
-              Your Area
+              <Store size={16} className="inline mr-2" />
+              Wholesale Store You Purchased Champions From
             </Label>
-            <Select value={location} onValueChange={setLocation}>
+            <Select value={wholesaleStore} onValueChange={setWholesaleStore} disabled={storesLoading}>
               <SelectTrigger className="h-12 text-base w-full" style={{ borderColor: BRAND_COLORS.gold + '40' }}>
-                <SelectValue placeholder="Select your area in Cape Town" />
+                <SelectValue placeholder={storesLoading ? 'Loading stores...' : 'Select the wholesale store'} />
               </SelectTrigger>
               <SelectContent className="max-h-64">
-                {CAPE_TOWN_AREAS.map((area) => (
-                  <SelectItem key={area} value={area}>{area}</SelectItem>
+                {stores.map((store) => (
+                  <SelectItem key={store.id} value={store.name}>{store.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -799,7 +929,7 @@ export default function ChampionCompetitionPage() {
               </>
             ) : (
               <>
-                Continue
+                Continue to Upload Slip
                 <ArrowRight size={18} className="ml-2" />
               </>
             )}
@@ -856,7 +986,7 @@ export default function ChampionCompetitionPage() {
               Entry: {entryData?.entryNumber || '—'}
             </span>
             <Badge variant="outline" className="text-xs" style={{ borderColor: BRAND_COLORS.gold, color: BRAND_COLORS.gold }}>
-              {entryData?.consumerName}
+              {entryData?.firstName} {entryData?.surname}
             </Badge>
           </div>
 
@@ -1349,9 +1479,17 @@ export default function ChampionCompetitionPage() {
               <div className="flex items-center justify-between">
                 <span style={{ color: '#888' }}>Name</span>
                 <span className="font-medium" style={{ color: BRAND_COLORS.text }}>
-                  {entryData?.consumerName}
+                  {entryData?.firstName} {entryData?.surname}
                 </span>
               </div>
+              {entryData?.dateOfBirth && (
+                <div className="flex items-center justify-between">
+                  <span style={{ color: '#888' }}>Date of Birth</span>
+                  <span className="font-medium" style={{ color: BRAND_COLORS.text }}>
+                    {entryData.dateOfBirth}
+                  </span>
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <span style={{ color: '#888' }}>Phone</span>
                 <span className="font-medium" style={{ color: BRAND_COLORS.text }}>
@@ -1359,9 +1497,21 @@ export default function ChampionCompetitionPage() {
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span style={{ color: '#888' }}>Area</span>
+                <span style={{ color: '#888' }}>Trader Name</span>
                 <span className="font-medium" style={{ color: BRAND_COLORS.text }}>
-                  {entryData?.consumerLocation}
+                  {entryData?.traderName}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span style={{ color: '#888' }}>Store Address</span>
+                <span className="font-medium" style={{ color: BRAND_COLORS.text }}>
+                  {entryData?.storeAddress}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span style={{ color: '#888' }}>Wholesale Store</span>
+                <span className="font-medium" style={{ color: BRAND_COLORS.text }}>
+                  {entryData?.wholesaleStore}
                 </span>
               </div>
               {validationResult?.championProducts && validationResult.championProducts.length > 0 && (

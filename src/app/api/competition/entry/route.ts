@@ -4,11 +4,18 @@ import { db } from '@/lib/db';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { consumerName, consumerPhone, consumerLocation } = body;
+    const { dateOfBirth, firstName, surname, traderName, storeAddress, wholesaleStore, consumerPhone } = body;
 
-    if (!consumerName || !consumerPhone) {
+    if (!firstName || !surname) {
       return NextResponse.json(
-        { error: 'Name and phone number are required' },
+        { error: 'First name and surname are required' },
+        { status: 400 }
+      );
+    }
+
+    if (!wholesaleStore) {
+      return NextResponse.json(
+        { error: 'Please select the wholesale store you purchased from' },
         { status: 400 }
       );
     }
@@ -22,9 +29,15 @@ export async function POST(request: NextRequest) {
 
     const entry = await db.competitionEntry.create({
       data: {
-        consumerName,
-        consumerPhone,
-        consumerLocation: consumerLocation || '',
+        dateOfBirth: dateOfBirth || '',
+        firstName,
+        surname,
+        traderName: traderName || '',
+        storeAddress: storeAddress || '',
+        wholesaleStore,
+        consumerPhone: consumerPhone || '',
+        consumerName: `${firstName} ${surname}`,  // computed for backward compat
+        consumerLocation: storeAddress || '',  // mapped for backward compat
         entryNumber,
         validationResult: 'pending',
       },
@@ -35,9 +48,12 @@ export async function POST(request: NextRequest) {
       entry: {
         id: entry.id,
         entryNumber: entry.entryNumber,
-        consumerName: entry.consumerName,
+        firstName: entry.firstName,
+        surname: entry.surname,
+        traderName: entry.traderName,
+        storeAddress: entry.storeAddress,
+        wholesaleStore: entry.wholesaleStore,
         consumerPhone: entry.consumerPhone,
-        consumerLocation: entry.consumerLocation,
         validationResult: entry.validationResult,
         createdAt: entry.createdAt,
       },
