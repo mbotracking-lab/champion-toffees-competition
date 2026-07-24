@@ -182,7 +182,7 @@ export async function GET() {
       if (existingAdmins.length === 0) {
         // Use gen_random_uuid() explicitly since neon HTTP may not honor DEFAULT
         await sql.query(
-          `INSERT INTO "AdminUser" (id, username, passwordHash, role) VALUES (gen_random_uuid()::text, 'admin', 'champion2026', 'admin')`
+          `INSERT INTO "AdminUser" (id, username, "passwordHash", role) VALUES (gen_random_uuid()::text, 'admin', 'champion2026', 'admin')`
         );
         adminCreated = true;
         log.push('Admin user created');
