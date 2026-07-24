@@ -626,8 +626,38 @@ export default function ChampionChatPage() {
     await addBotMessage(CHAT_FLOW[7].botMessage);
   }, [addBotMessage, addUserMessage]);
 
-  // ─── Handle image upload ───
-  const processFile = useCallback((file: File) => {
+  // ─── Handle image upload with compression ───
+  const compressImage = useCallback((file: File, maxWidth: number = 1200, quality: number = 0.8): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { reject(new Error('Canvas not supported')); return; }
+
+      const img = new Image();
+      img.onload = () => {
+        // Scale down if image is too wide/tall
+        let width = img.width;
+        let height = img.height;
+        if (width > maxWidth || height > maxWidth) {
+          const ratio = Math.min(maxWidth / width, maxWidth / height);
+          width = Math.round(width * ratio);
+          height = Math.round(height * ratio);
+        }
+        canvas.width = width;
+        canvas.height = height;
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Compress to JPEG with quality setting
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+        const base64 = compressedDataUrl.split(',')[1];
+        resolve(base64);
+      };
+      img.onerror = () => reject(new Error('Failed to load image'));
+      img.src = URL.createObjectURL(file);
+    });
+  }, []);
+
+  const processFile = useCallback(async (file: File) => {
     if (!file.type.startsWith('image/')) {
       setError('Please upload an image file');
       return;
@@ -637,15 +667,32 @@ export default function ChampionChatPage() {
       return;
     }
     setError(null);
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const result = e.target?.result as string;
-      setImagePreview(result);
-      const base64 = result.split(',')[1];
-      setImageBase64(base64);
-    };
-    reader.readAsDataURL(file);
-  }, []);
+
+    try {
+      // Compress the image for VLM analysis (reduces ~2MB images to ~300KB)
+      const compressedBase64 = await compressImage(file, 1200, 0.8);
+      setImageBase64(compressedBase64);
+
+      // Use original for preview (higher quality display)
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const result = e.target?.result as string;
+        setImagePreview(result);
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      console.error('Image compression failed, using original:', err);
+      // Fallback: use original image if compression fails
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const result = e.target?.result as string;
+        setImagePreview(result);
+        const base64 = result.split(',')[1];
+        setImageBase64(base64);
+      };
+      reader.readAsDataURL(file);
+    }
+  }, [compressImage]);
 
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

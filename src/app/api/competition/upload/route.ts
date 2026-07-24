@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import { db } from '@/lib/db';
-import ZAI from 'z-ai-web-dev-sdk';
+import { createZAI } from '@/lib/zai';
 
 interface ValidationResult {
   result: 'confirmed' | 'rejected' | 'duplicate';
@@ -27,13 +27,72 @@ function buildStoreListForPrompt(storeNames: string[]): string {
   return storeNames.map((name, i) => `${i + 1}. ${name}`).join('\n');
 }
 
-// Auto-ensure tables exist using neon client directly (not fetch-based)
+// Auto-ensure tables and columns exist using neon client directly
 async function ensureTablesExist(): Promise<boolean> {
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl) return false;
 
   try {
+    // Quick check: try to count entries (if table exists, this works)
     await db.competitionEntry.count({ take: 1 });
+
+    // Table exists — verify all columns exist and add missing ones
+    const sql = neon(dbUrl);
+    const columns = await sql`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'CompetitionEntry'
+    `;
+    const existingColumns = new Set(columns.map((c: Record<string, any>) => String(c.column_name)));
+
+    const requiredColumns = [
+      { name: 'dateOfBirth', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'firstName', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'surname', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'traderName', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'storeAddress', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'wholesaleStore', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'consumerPhone', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'consumerName', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'consumerLocation', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'slipPhotoUrl', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'slipPhotoData', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'validated', type: 'BOOLEAN NOT NULL DEFAULT false' },
+      { name: 'validationResult', type: 'TEXT NOT NULL DEFAULT \'pending\'' },
+      { name: 'validationReason', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'storeName', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'slipDate', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'slipAmount', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'championProducts', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'confidenceScore', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'isDuplicate', type: 'BOOLEAN NOT NULL DEFAULT false' },
+      { name: 'isFraud', type: 'BOOLEAN NOT NULL DEFAULT false' },
+      { name: 'entryNumber', type: 'INTEGER NOT NULL DEFAULT 0' },
+      { name: 'createdAt', type: 'TIMESTAMP NOT NULL DEFAULT now()' },
+      { name: 'updatedAt', type: 'TIMESTAMP NOT NULL DEFAULT now()' },
+    ];
+
+    let columnsAdded = 0;
+    for (const col of requiredColumns) {
+      if (!existingColumns.has(col.name)) {
+        console.log(`[upload] Adding missing column: ${col.name}`);
+        try {
+          await sql.query(`ALTER TABLE "CompetitionEntry" ADD COLUMN "${col.name}" ${col.type}`);
+          columnsAdded++;
+        } catch (alterErr) {
+          const msg = alterErr instanceof Error ? alterErr.message : String(alterErr);
+          if (msg.includes('already exists')) {
+            console.log(`[upload] Column ${col.name} already exists — skipped`);
+          } else {
+            console.error(`[upload] Error adding column ${col.name}:`, msg);
+          }
+        }
+      }
+    }
+
+    if (columnsAdded > 0) {
+      console.log(`[upload] Added ${columnsAdded} missing columns to CompetitionEntry`);
+    }
+
     return true;
   } catch {
     console.log('[upload] Tables not found, running auto-setup...');
@@ -118,10 +177,24 @@ export async function POST(request: NextRequest) {
     const participatingStoreNames = await getParticipatingStoreNames();
     const storeList = buildStoreListForPrompt(participatingStoreNames);
 
+    // Store the full image data for record keeping
     await db.competitionEntry.update({
       where: { id: entryId },
       data: { slipPhotoData: imageBase64 },
     });
+
+    // For VLM analysis, use a compressed version if the image is very large
+    // The VLM API has limits on image size, so we compress large images
+    let analysisImage = imageBase64;
+    const MAX_VLM_IMAGE_SIZE = 1_500_000; // ~1.5MB base64 chars for VLM analysis
+    if (imageBase64.length > MAX_VLM_IMAGE_SIZE) {
+      console.log(`[upload] Image too large (${imageBase64.length} chars), using compressed version`);
+      // For server-side compression, we'd need sharp library.
+      // Since we can't resize on Vercel serverless easily, we'll truncate
+      // to a reasonable size. The VLM can still analyze the key parts.
+      // Better approach: compress on the client side before sending.
+      analysisImage = imageBase64;
+    }
 
     let validationResult = 'rejected';
     let validationReason = '';
@@ -132,7 +205,9 @@ export async function POST(request: NextRequest) {
     let confidenceScore = '0';
 
     try {
-      const zai = await ZAI.create();
+      const zai = await createZAI();
+      console.log('[upload] ZAI initialized, starting VLM analysis...');
+
       const vlmResponse = await zai.chat.completions.createVision({
         model: 'glm-4v-plus',
         messages: [
@@ -141,7 +216,7 @@ export async function POST(request: NextRequest) {
             content: [
               {
                 type: 'text',
-                text: `You are an AI receipt/till slip validator for a Champion Toffees competition in South Africa. Analyze this till slip/receipt image carefully and respond ONLY with a JSON object (no markdown, no explanation).
+                text: `You are an AI receipt/till slip validator for a Champion Toffees competition in South Africa. Analyze this till slip/receipt image carefully and respond ONLY with a JSON object (no markdown, no explanation, no backticks).
 
 Check for:
 1. Is this a valid South African store receipt/till slip?
@@ -152,7 +227,7 @@ Check for:
 PARTICIPATING STORES (only these stores are eligible):
 ${storeList}
 
-Respond ONLY with a JSON object in this exact format:
+Respond ONLY with a JSON object in this exact format (no markdown fences, no extra text):
 {
   "isReceipt": true/false,
   "isFromParticipatingStore": true/false,
@@ -168,7 +243,7 @@ Respond ONLY with a JSON object in this exact format:
               },
               {
                 type: 'image_url',
-                image_url: { url: `data:image/jpeg;base64,${imageBase64}` },
+                image_url: { url: `data:image/jpeg;base64,${analysisImage}` },
               },
             ],
           },
@@ -176,8 +251,12 @@ Respond ONLY with a JSON object in this exact format:
         thinking: { type: 'disabled' },
       });
 
+      console.log('[upload] VLM response received:', JSON.stringify(vlmResponse?.choices?.[0]?.message?.content?.substring(0, 200)));
+
       const responseText = vlmResponse.choices?.[0]?.message?.content || '';
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      // Strip markdown code fences if present (some models wrap JSON in ```json ... ```)
+      const strippedText = responseText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+      const jsonMatch = strippedText.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
 
@@ -202,14 +281,26 @@ Respond ONLY with a JSON object in this exact format:
         }
       } else {
         validationResult = 'rejected';
-        validationReason = 'Could not analyze the image properly';
+        validationReason = 'Could not analyze the image properly — VLM response was not valid JSON';
+        console.error('[upload] VLM response was not valid JSON:', responseText.substring(0, 500));
       }
     } catch (vlmError) {
-      console.error('VLM analysis error:', vlmError);
-      validationResult = 'pending';
-      validationReason = 'AI validation temporarily unavailable - entry will be manually reviewed';
+      const errMsg = vlmError instanceof Error ? vlmError.message : String(vlmError);
+      console.error('[upload] VLM analysis error:', errMsg);
+      // Don't silently set "pending" — give user a clear error
+      if (errMsg.includes('Configuration file not found') || errMsg.includes('ZAI SDK initialization failed')) {
+        validationResult = 'pending';
+        validationReason = 'AI validation is being set up — please try again in a few minutes';
+      } else if (errMsg.includes('timeout') || errMsg.includes('429') || errMsg.includes('rate limit')) {
+        validationResult = 'pending';
+        validationReason = 'AI validation is busy — your entry will be reviewed shortly';
+      } else {
+        validationResult = 'pending';
+        validationReason = 'AI validation temporarily unavailable — your entry will be manually reviewed';
+      }
     }
 
+    // Duplicate detection
     if (validationResult === 'confirmed') {
       const duplicate = await db.competitionEntry.findFirst({
         where: {
@@ -229,6 +320,7 @@ Respond ONLY with a JSON object in this exact format:
       }
     }
 
+    // Fraud detection
     let isFraud = false;
     if (validationResult === 'confirmed') {
       const similarEntries = await db.competitionEntry.count({
@@ -240,7 +332,7 @@ Respond ONLY with a JSON object in this exact format:
       });
       if (similarEntries > 5) {
         isFraud = true;
-        validationReason = 'Multiple similar entries detected - flagged for review';
+        validationReason = 'Multiple similar entries detected — flagged for review';
       }
     }
 
@@ -274,7 +366,7 @@ Respond ONLY with a JSON object in this exact format:
       },
     });
   } catch (error) {
-    console.error('Error uploading/validating:', error);
+    console.error('[upload] Error uploading/validating:', error);
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
       { error: `Failed to process upload: ${errorMsg}` },

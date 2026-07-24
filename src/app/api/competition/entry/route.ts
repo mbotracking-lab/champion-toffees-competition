@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import { db } from '@/lib/db';
 
-// Auto-ensure tables exist before creating an entry
+// Auto-ensure tables and columns exist before creating an entry
 async function ensureTablesExist(): Promise<boolean> {
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl) return false;
@@ -10,10 +10,68 @@ async function ensureTablesExist(): Promise<boolean> {
   try {
     // Quick check: try to count entries (if table exists, this works)
     await db.competitionEntry.count({ take: 1 });
+
+    // Table exists — but we need to verify all columns exist
+    const sql = neon(dbUrl);
+    const columns = await sql`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'CompetitionEntry'
+    `;
+    const existingColumns = new Set(columns.map((c: Record<string, any>) => String(c.column_name)));
+
+    const requiredColumns = [
+      { name: 'dateOfBirth', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'firstName', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'surname', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'traderName', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'storeAddress', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'wholesaleStore', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'consumerPhone', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'consumerName', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'consumerLocation', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'slipPhotoUrl', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'slipPhotoData', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'validated', type: 'BOOLEAN NOT NULL DEFAULT false' },
+      { name: 'validationResult', type: 'TEXT NOT NULL DEFAULT \'pending\'' },
+      { name: 'validationReason', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'storeName', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'slipDate', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'slipAmount', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'championProducts', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'confidenceScore', type: 'TEXT NOT NULL DEFAULT \'' },
+      { name: 'isDuplicate', type: 'BOOLEAN NOT NULL DEFAULT false' },
+      { name: 'isFraud', type: 'BOOLEAN NOT NULL DEFAULT false' },
+      { name: 'entryNumber', type: 'INTEGER NOT NULL DEFAULT 0' },
+      { name: 'createdAt', type: 'TIMESTAMP NOT NULL DEFAULT now()' },
+      { name: 'updatedAt', type: 'TIMESTAMP NOT NULL DEFAULT now()' },
+    ];
+
+    let columnsAdded = 0;
+    for (const col of requiredColumns) {
+      if (!existingColumns.has(col.name)) {
+        console.log(`[entry] Adding missing column: ${col.name}`);
+        try {
+          await sql.query(`ALTER TABLE "CompetitionEntry" ADD COLUMN "${col.name}" ${col.type}`);
+          columnsAdded++;
+        } catch (alterErr) {
+          const msg = alterErr instanceof Error ? alterErr.message : String(alterErr);
+          if (msg.includes('already exists')) {
+            console.log(`[entry] Column ${col.name} already exists — skipped`);
+          } else {
+            console.error(`[entry] Error adding column ${col.name}:`, msg);
+          }
+        }
+      }
+    }
+
+    if (columnsAdded > 0) {
+      console.log(`[entry] Added ${columnsAdded} missing columns to CompetitionEntry`);
+    }
+
     return true;
-  } catch {
-    // Table doesn't exist — run setup using neon client directly
-    console.log('[entry] CompetitionEntry table not found, running auto-setup...');
+  } catch (countErr) {
+    // Table doesn't exist — create it
+    console.log('[entry] CompetitionEntry table not found, creating...');
     try {
       const sql = neon(dbUrl);
 
@@ -45,13 +103,22 @@ async function ensureTablesExist(): Promise<boolean> {
         "updatedAt" TIMESTAMP NOT NULL DEFAULT now()
       )`;
 
-      // Also ensure other required tables exist
-      await sql`CREATE TABLE IF NOT EXISTS "ParticipatingStore" (
+      await sql`CREATE TABLE IF NOT EXISTS "CompetitionStats" (
         "id" TEXT NOT NULL PRIMARY KEY DEFAULT gen_random_uuid()::text,
-        "name" TEXT NOT NULL UNIQUE,
-        "region" TEXT NOT NULL DEFAULT '',
-        "createdAt" TIMESTAMP NOT NULL DEFAULT now(),
+        "totalEntries" INTEGER NOT NULL DEFAULT 0,
+        "confirmedEntries" INTEGER NOT NULL DEFAULT 0,
+        "rejectedEntries" INTEGER NOT NULL DEFAULT 0,
+        "duplicateEntries" INTEGER NOT NULL DEFAULT 0,
+        "fraudEntries" INTEGER NOT NULL DEFAULT 0,
+        "pendingEntries" INTEGER NOT NULL DEFAULT 0,
         "updatedAt" TIMESTAMP NOT NULL DEFAULT now()
+      )`;
+
+      await sql`CREATE TABLE IF NOT EXISTS "CompetitionWinner" (
+        "id" TEXT NOT NULL PRIMARY KEY DEFAULT gen_random_uuid()::text,
+        "entryId" TEXT NOT NULL UNIQUE,
+        "prize" TEXT NOT NULL,
+        "drawnAt" TIMESTAMP NOT NULL DEFAULT now()
       )`;
 
       await sql`CREATE TABLE IF NOT EXISTS "AdminUser" (
@@ -63,10 +130,18 @@ async function ensureTablesExist(): Promise<boolean> {
         "updatedAt" TIMESTAMP NOT NULL DEFAULT now()
       )`;
 
+      await sql`CREATE TABLE IF NOT EXISTS "ParticipatingStore" (
+        "id" TEXT NOT NULL PRIMARY KEY DEFAULT gen_random_uuid()::text,
+        "name" TEXT NOT NULL UNIQUE,
+        "region" TEXT NOT NULL DEFAULT '',
+        "createdAt" TIMESTAMP NOT NULL DEFAULT now(),
+        "updatedAt" TIMESTAMP NOT NULL DEFAULT now()
+      )`;
+
       // Seed stores if empty
-      const existingStores = await sql`SELECT COUNT(*) as count FROM "ParticipatingStore"`;
+      const existingStores = await sql`SELECT COUNT(*)::int as count FROM "ParticipatingStore"`;
       if (existingStores[0].count === 0) {
-        const storeInserts = [
+        const storeInserts: [string, string][] = [
           ['Phoenix PMB', 'KZN'], ['Phoenix Prospecton', 'KZN'], ['Phoenix Empangeni', 'KZN'],
           ['Tradeport', 'KZN'], ['North City', 'KZN'], ['One up', 'WC'],
           ['Best deal', 'WC'], ['Sweet connection', 'EC'], ['Trade Value', 'EC'],
@@ -78,14 +153,22 @@ async function ensureTablesExist(): Promise<boolean> {
           ['Big Save Hamanskraal', ''],
         ];
         for (const [name, region] of storeInserts) {
-          await sql`INSERT INTO "ParticipatingStore" (name, region) VALUES (${name}, ${region})`;
+          const escapedName = name.replace(/'/g, "''");
+          const escapedRegion = region.replace(/'/g, "''");
+          await sql.query(
+            `INSERT INTO "ParticipatingStore" (id, name, region, "createdAt", "updatedAt") VALUES (gen_random_uuid()::text, '${escapedName}', '${escapedRegion}', now(), now())`
+          );
         }
+        console.log('[entry] Stores seeded');
       }
 
       // Seed admin if empty
       const existingAdmins = await sql`SELECT id FROM "AdminUser" WHERE username = 'admin'`;
       if (existingAdmins.length === 0) {
-        await sql`INSERT INTO "AdminUser" (username, passwordHash, role) VALUES ('admin', 'champion2026', 'admin')`;
+        await sql.query(
+          `INSERT INTO "AdminUser" (id, username, passwordHash, role, "createdAt", "updatedAt") VALUES (gen_random_uuid()::text, 'admin', 'champion2026', 'admin', now(), now())`
+        );
+        console.log('[entry] Admin user created');
       }
 
       console.log('[entry] Auto-setup completed successfully');
@@ -116,7 +199,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Ensure database tables exist before proceeding
+    // Ensure database tables and columns exist before proceeding
     const tablesReady = await ensureTablesExist();
     if (!tablesReady) {
       return NextResponse.json(
@@ -155,16 +238,18 @@ export async function POST(request: NextRequest) {
         entryNumber: entry.entryNumber,
         firstName: entry.firstName,
         surname: entry.surname,
+        dateOfBirth: entry.dateOfBirth,
         traderName: entry.traderName,
         storeAddress: entry.storeAddress,
         wholesaleStore: entry.wholesaleStore,
         consumerPhone: entry.consumerPhone,
+        consumerName: entry.consumerName,
         validationResult: entry.validationResult,
         createdAt: entry.createdAt,
       },
     });
   } catch (error) {
-    console.error('Error creating entry:', error);
+    console.error('[entry] Error creating entry:', error);
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
       { error: `Failed to create entry: ${errorMsg}` },

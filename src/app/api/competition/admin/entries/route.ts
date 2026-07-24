@@ -41,6 +41,12 @@ export async function GET(request: NextRequest) {
       select: {
         id: true,
         entryNumber: true,
+        firstName: true,
+        surname: true,
+        dateOfBirth: true,
+        traderName: true,
+        storeAddress: true,
+        wholesaleStore: true,
         consumerName: true,
         consumerPhone: true,
         consumerLocation: true,
