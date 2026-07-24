@@ -3,6 +3,7 @@ import { readdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
 import os from 'os';
 import { getDatabaseUrl } from '@/lib/config';
+import { createZAI } from '@/lib/zai';
 
 // Diagnostic endpoint to debug ZAI config file issues on Vercel
 export async function GET() {
@@ -124,6 +125,68 @@ export async function GET() {
     }
   } else {
     diagnostics.dbTest = { success: false, error: 'DATABASE_URL not set' };
+  }
+
+  // Test VLM vision call
+  try {
+    const zai = await createZAI();
+    diagnostics.vlmInit = { success: true, instanceType: typeof zai };
+
+    // Try a simple text-only chat completion first
+    try {
+      const textResponse = await zai.chat.completions.create({
+        messages: [
+          { role: 'user', content: 'Say "VLM test OK" in exactly those words.' }
+        ],
+        thinking: { type: 'disabled' },
+      });
+      diagnostics.vlmTextTest = {
+        success: true,
+        response: textResponse.choices?.[0]?.message?.content || 'no content',
+        model: textResponse.model || 'unknown',
+      };
+    } catch (textErr) {
+      diagnostics.vlmTextTest = {
+        success: false,
+        error: textErr instanceof Error ? textErr.message : String(textErr),
+        errorStack: textErr instanceof Error ? textErr.stack?.substring(0, 500) : undefined,
+      };
+    }
+
+    // Try a vision call with a tiny test image
+    try {
+      // Create a minimal 1x1 red pixel PNG
+      const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg==';
+      const visionResponse = await zai.chat.completions.createVision({
+        model: 'glm-4v-plus',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'What color is this image? Reply with just the color name.' },
+              { type: 'image_url', image_url: { url: `data:image/png;base64,${tinyPng}` } },
+            ],
+          },
+        ],
+        thinking: { type: 'disabled' },
+      });
+      diagnostics.vlmVisionTest = {
+        success: true,
+        response: visionResponse.choices?.[0]?.message?.content || 'no content',
+        model: visionResponse.model || 'unknown',
+      };
+    } catch (visionErr) {
+      diagnostics.vlmVisionTest = {
+        success: false,
+        error: visionErr instanceof Error ? visionErr.message : String(visionErr),
+        errorStack: visionErr instanceof Error ? visionErr.stack?.substring(0, 500) : undefined,
+      };
+    }
+  } catch (zaiErr) {
+    diagnostics.vlmInit = {
+      success: false,
+      error: zaiErr instanceof Error ? zaiErr.message : String(zaiErr),
+    };
   }
 
   return NextResponse.json(diagnostics);
