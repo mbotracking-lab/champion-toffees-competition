@@ -104,7 +104,7 @@ const BRAND = {
 
 // ─── Chat Flow Definition ───
 const CHAT_FLOW: { phase: ChatPhase; botMessage: string }[] = [
-  { phase: 'greeting', botMessage: '👋 Welcome to the Champion Toffees "Buy, Snap, Win!" Competition!\n\nPurchase Champion Toffees from a participating wholesale store, snap your till slip, and you could win amazing prizes!\n\nOur AI will instantly verify your entry. Let\'s get you started! 🏆' },
+  { phase: 'greeting', botMessage: '👋 Welcome to the Champion Toffees "Buy, Snap, Win!" Competition!\n\nPurchase Champion Toffees from a participating wholesale store, snap your till slip, and you could win amazing prizes!\n\nWe\'ll instantly verify your entry. Let\'s get you started! 🏆' },
   { phase: 'askDob', botMessage: 'First, I need a few details from you.\n\nWhat is your Date of Birth? (DD/MM/YYYY)' },
   { phase: 'askFirstName', botMessage: 'Great! ✅\n\nWhat is your First Name?' },
   { phase: 'askSurname', botMessage: 'And what is your Surname?' },
@@ -750,7 +750,7 @@ export default function ChampionChatPage() {
     setPhase('validating');
 
     // Show validating message
-    await addBotMessage('🔍 Analyzing your till slip...\n\nOur AI is checking:\n• Is this a valid receipt?\n• Is it from a participating store?\n• Does it show Champion products?\n• Is it authentic?', 'typing');
+    await addBotMessage('🔍 Analyzing your till slip...\n\nChecking:\n• Is this a valid receipt?\n• Is it from a participating store?\n• Does it show Champion products?\n• Is it authentic?', 'text');
 
     try {
       const response = await fetch('/api/competition/upload', {
@@ -771,10 +771,13 @@ export default function ChampionChatPage() {
       const validation: ValidationResult = data.validation || data;
       setValidationResult(validation);
 
-      // Add typing delay to simulate processing
-      setIsTyping(true);
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      setIsTyping(false);
+      // For pending results, skip the extra typing delay — the conversation is complete
+      // For confirmed/rejected results, add a brief delay to simulate final processing
+      if (validation.result !== 'pending') {
+        setIsTyping(true);
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        setIsTyping(false);
+      }
 
       if (validation.result === 'confirmed') {
         setPhase('resultConfirmed');
@@ -797,14 +800,26 @@ export default function ChampionChatPage() {
         );
       } else if (validation.result === 'pending') {
         setPhase('resultPending');
-        await addBotMessage(
-          `⏳ Your entry is being reviewed!\n\nEntry #${entryData?.entryNumber || ''}\n\n${validation.reason || 'Our AI is validating your till slip. This usually takes a few minutes.'}\n\nWe'll confirm your entry once the validation is complete. You can check back later or wait for our confirmation.`,
-          'result',
-          { resultData: validation }
-        );
-        await addBotMessage(
-          `📱 Tip: Save your entry number and check the status later. Validations are typically processed within 30 minutes during business hours.\n\nType "again" to enter with a new slip, or "check" to re-check your entry status.`
-        );
+        // No extra typing delay for pending — show result immediately so user knows conversation is complete
+        setIsTyping(false);
+        const pendingMsg: ChatMessage = {
+          id: generateId(),
+          from: 'bot',
+          text: `⏳ Your entry is being reviewed!\n\nEntry #${entryData?.entryNumber || ''}\n\n${validation.reason || 'Your till slip is being validated. This usually takes a few minutes.'}\n\nWe'll confirm your entry once the review is complete. You can check back later for the result.`,
+          timestamp: new Date(),
+          type: 'result',
+          resultData: validation,
+        };
+        setMessages(prev => [...prev, pendingMsg]);
+
+        // Add tip message immediately (no typing delay)
+        const tipMsg: ChatMessage = {
+          id: generateId(),
+          from: 'bot',
+          text: `📱 Tip: Save your entry number and check the status later. Reviews are typically completed within 30 minutes.\n\nType "again" to enter with a new slip, or "check" to re-check your entry status.`,
+          timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, tipMsg]);
       } else {
         setPhase('resultRejected');
         await addBotMessage(

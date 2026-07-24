@@ -67,6 +67,7 @@ import {
   BarChart3,
   TrendingUp,
   Star,
+  Trash2,
 } from 'lucide-react';
 
 // ─── Types ───
@@ -177,6 +178,7 @@ export default function AdminDashboard() {
   const [overrideReason, setOverrideReason] = useState('');
   const [overrideFraud, setOverrideFraud] = useState(false);
   const [overrideLoading, setOverrideLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState<string | null>(null);
 
   // Fraud
   const [fraudEntries, setFraudEntries] = useState<FraudEntry[]>([]);
@@ -244,43 +246,42 @@ export default function AdminDashboard() {
     setStatsLoading(true);
     try {
       const data = await apiCall('/api/competition/admin/stats');
-      setStats(data);
+      // Map API response fields to frontend expected format
+      const statsData = data.stats || data;
+      // Group recent entries by date for trend chart
+      let trendData: { date: string; entries: number }[] = [];
+      if (statsData.recentEntries) {
+        const grouped: Record<string, number> = {};
+        for (const entry of statsData.recentEntries) {
+          const dateStr = new Date(entry.date || entry.createdAt).toLocaleDateString('en-ZA', { weekday: 'short' });
+          grouped[dateStr] = (grouped[dateStr] || 0) + 1;
+        }
+        trendData = Object.entries(grouped).map(([date, entries]) => ({ date, entries }));
+      }
+
+      setStats({
+        totalEntries: statsData.totalEntries || 0,
+        confirmed: statsData.confirmedEntries || statsData.confirmed || 0,
+        rejected: statsData.rejectedEntries || statsData.rejected || 0,
+        pending: statsData.pendingEntries || statsData.pending || 0,
+        fraud: statsData.fraudEntries || statsData.fraud || 0,
+        winners: statsData.winnersCount || statsData.winners || 0,
+        locationBreakdown: statsData.locationBreakdown || [],
+        storeBreakdown: statsData.storeBreakdown || [],
+        recentTrend: trendData.length > 0 ? trendData : statsData.recentTrend || [],
+      });
     } catch {
       // Use mock data on failure
       setStats({
-        totalEntries: 1248,
-        confirmed: 856,
-        rejected: 189,
-        pending: 102,
-        fraud: 67,
-        winners: 12,
-        locationBreakdown: [
-          { location: 'Khayelitsha', count: 320 },
-          { location: 'Gugulethu', count: 245 },
-          { location: 'Nyanga', count: 198 },
-          { location: 'Langa', count: 156 },
-          { location: 'Mitchells Plain', count: 134 },
-          { location: 'Delft', count: 112 },
-          { location: 'Philippi', count: 83 },
-        ],
-        storeBreakdown: [
-          { store: 'Shoprite Khayelitsha', count: 180 },
-          { store: 'Boxer Gugulethu', count: 145 },
-          { store: 'Pick n Pay Nyanga', count: 120 },
-          { store: 'Spar Langa', count: 95 },
-          { store: 'Shoprite Mitchells Plain', count: 88 },
-          { store: 'USave Delft', count: 72 },
-          { store: 'Boxer Philippi', count: 55 },
-        ],
-        recentTrend: [
-          { date: 'Mon', entries: 45 },
-          { date: 'Tue', entries: 62 },
-          { date: 'Wed', entries: 78 },
-          { date: 'Thu', entries: 54 },
-          { date: 'Fri', entries: 91 },
-          { date: 'Sat', entries: 120 },
-          { date: 'Sun', entries: 88 },
-        ],
+        totalEntries: 0,
+        confirmed: 0,
+        rejected: 0,
+        pending: 0,
+        fraud: 0,
+        winners: 0,
+        locationBreakdown: [],
+        storeBreakdown: [],
+        recentTrend: [],
       });
     } finally {
       setStatsLoading(false);
@@ -403,11 +404,49 @@ export default function AdminDashboard() {
       setDetailDialogOpen(false);
       fetchEntries();
     } catch {
-      // Even on failure, close dialog and refresh to show we handled it
       setDetailDialogOpen(false);
       fetchEntries();
     } finally {
       setOverrideLoading(false);
+    }
+  };
+
+  // ─── Delete Entry ───
+  const handleDeleteEntry = async (entryId: string, entryNumber: number) => {
+    if (!confirm(`Are you sure you want to delete Entry #${entryNumber}? This will also remove any winner records linked to this entry.`)) return;
+    setDeleteLoading(entryId);
+    try {
+      await apiCall(`/api/competition/admin/entry/${entryId}`, {
+        method: 'DELETE',
+      });
+      setDetailDialogOpen(false);
+      fetchEntries();
+      fetchStats();
+      fetchWinners();
+    } catch {
+      // Still refresh on error
+      fetchEntries();
+      fetchStats();
+    } finally {
+      setDeleteLoading(null);
+    }
+  };
+
+  // ─── Delete Winner ───
+  const handleDeleteWinner = async (winnerId: string, entryName: string) => {
+    if (!confirm(`Are you sure you want to remove ${entryName} as a winner? The entry record will remain.`)) return;
+    setDeleteLoading(winnerId);
+    try {
+      await apiCall(`/api/competition/admin/winner/${winnerId}`, {
+        method: 'DELETE',
+      });
+      fetchWinners();
+      fetchStats();
+    } catch {
+      fetchWinners();
+      fetchStats();
+    } finally {
+      setDeleteLoading(null);
     }
   };
 
@@ -486,6 +525,11 @@ export default function AdminDashboard() {
   };
 
   // ─── Effects ───
+  // Fetch stats immediately on login (overview data should be available from any tab)
+  useEffect(() => {
+    if (isAuthenticated) fetchStats();
+  }, [isAuthenticated, fetchStats]);
+
   useEffect(() => {
     if (isAuthenticated && activeTab === 'overview') fetchStats();
   }, [isAuthenticated, activeTab, fetchStats]);
@@ -1228,6 +1272,7 @@ export default function AdminDashboard() {
                               <TableHead className="text-zinc-400 bg-zinc-900 sticky top-0">Location</TableHead>
                               <TableHead className="text-zinc-400 bg-zinc-900 sticky top-0">Prize</TableHead>
                               <TableHead className="text-zinc-400 bg-zinc-900 sticky top-0">Drawn At</TableHead>
+                              <TableHead className="text-zinc-400 bg-zinc-900 sticky top-0">Actions</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
@@ -1258,6 +1303,21 @@ export default function AdminDashboard() {
                                     hour: '2-digit',
                                     minute: '2-digit',
                                   })}
+                                </TableCell>
+                                <TableCell>
+                                  <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    onClick={() => handleDeleteWinner(winner.id, winner.consumerName)}
+                                    disabled={deleteLoading === winner.id}
+                                    className="h-7 text-xs bg-red-600 hover:bg-red-700"
+                                  >
+                                    {deleteLoading === winner.id ? (
+                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                      <Trash2 className="w-3 h-3" />
+                                    )}
+                                  </Button>
                                 </TableCell>
                               </TableRow>
                             ))}
@@ -1419,26 +1479,41 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              <DialogFooter className="mt-4">
+              <DialogFooter className="mt-4 flex-row justify-between w-full">
                 <Button
-                  variant="ghost"
-                  onClick={() => setDetailDialogOpen(false)}
-                  className="text-zinc-400 hover:text-zinc-100"
+                  variant="destructive"
+                  onClick={() => selectedEntry && handleDeleteEntry(selectedEntry.id, selectedEntry.entryNumber)}
+                  disabled={deleteLoading === selectedEntry?.id}
+                  className="bg-red-600 hover:bg-red-700 text-white"
                 >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={handleOverrideStatus}
-                  disabled={overrideLoading}
-                  className="bg-amber-600 hover:bg-amber-700 text-white"
-                >
-                  {overrideLoading ? (
+                  {deleteLoading === selectedEntry?.id ? (
                     <Loader2 className="w-4 h-4 animate-spin mr-2" />
                   ) : (
-                    <CheckCircle2 className="w-4 h-4 mr-2" />
+                    <Trash2 className="w-4 h-4 mr-2" />
                   )}
-                  Save Override
+                  Delete Entry
                 </Button>
+                <div className="flex gap-2">
+                  <Button
+                    variant="ghost"
+                    onClick={() => setDetailDialogOpen(false)}
+                    className="text-zinc-400 hover:text-zinc-100"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleOverrideStatus}
+                    disabled={overrideLoading}
+                    className="bg-amber-600 hover:bg-amber-700 text-white"
+                  >
+                    {overrideLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    ) : (
+                      <CheckCircle2 className="w-4 h-4 mr-2" />
+                    )}
+                    Save Override
+                  </Button>
+                </div>
               </DialogFooter>
             </div>
           )}

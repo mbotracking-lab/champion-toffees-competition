@@ -7,10 +7,10 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 
 export const metadata: Metadata = {
   title: "Champion Toffees Competition Bot — Buy, Snap, Win!",
-  description: "Chat with our AI bot to enter the Champion Toffees competition! Buy Champion Toffees, snap your till slip, and win amazing prizes.",
+  description: "Enter the Champion Toffees competition! Buy Champion Toffees, snap your till slip, and win amazing prizes.",
   openGraph: {
     title: "Champion Toffees Competition Bot — Buy, Snap, Win!",
-    description: "Chat with our AI bot to enter the Champion Toffees competition!",
+    description: "Enter the Champion Toffees competition!",
     type: "website",
   },
 };

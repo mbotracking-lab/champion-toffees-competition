@@ -65,3 +65,44 @@ export async function PATCH(
     );
   }
 }
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+
+    const entry = await db.competitionEntry.findUnique({
+      where: { id },
+    });
+
+    if (!entry) {
+      return NextResponse.json(
+        { error: 'Entry not found' },
+        { status: 404 }
+      );
+    }
+
+    // First delete any winner records linked to this entry
+    await db.competitionWinner.deleteMany({
+      where: { entryId: id },
+    });
+
+    // Then delete the entry itself
+    await db.competitionEntry.delete({
+      where: { id },
+    });
+
+    return NextResponse.json({
+      success: true,
+      message: `Entry #${entry.entryNumber} deleted successfully`,
+    });
+  } catch (error) {
+    console.error('Error deleting entry:', error);
+    return NextResponse.json(
+      { error: 'Failed to delete entry' },
+      { status: 500 }
+    );
+  }
+}
