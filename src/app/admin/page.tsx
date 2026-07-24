@@ -357,12 +357,12 @@ export default function AdminDashboard() {
     } catch {
       // Mock fraud data
       setFraudEntries([
-        { id: 'f1', entryNumber: 'CT-00012', consumerName: 'John Doe', consumerPhone: '0812345678', consumerLocation: 'Khayelitsha', fraudIndicators: ['Multiple entries from same phone (3 entries)', 'Same till slip reused'], isFraud: true, createdAt: '2026-07-18' },
-        { id: 'f2', entryNumber: 'CT-00045', consumerName: 'Jane Smith', consumerPhone: '0823456789', consumerLocation: 'Gugulethu', fraudIndicators: ['Suspicious slip pattern', 'Amount mismatch'], isFraud: true, createdAt: '2026-07-19' },
-        { id: 'f3', entryNumber: 'CT-00078', consumerName: 'Bob Wilson', consumerPhone: '0812345678', consumerLocation: 'Khayelitsha', fraudIndicators: ['Multiple entries from same phone (3 entries)', 'Different store names same slip'], isFraud: true, createdAt: '2026-07-19' },
-        { id: 'f4', entryNumber: 'CT-00102', consumerName: 'Alice Brown', consumerPhone: '0834567890', consumerLocation: 'Nyanga', fraudIndicators: ['Confidence score below threshold (0.15)'], isFraud: false, createdAt: '2026-07-20' },
-        { id: 'f5', entryNumber: 'CT-00135', consumerName: 'Peter Zulu', consumerPhone: '0845678901', consumerLocation: 'Langa', fraudIndicators: ['Multiple entries same phone (2 entries)', 'Same date/time on different slips'], isFraud: true, createdAt: '2026-07-20' },
-        { id: 'f6', entryNumber: 'CT-00168', consumerName: 'Mary Nkosi', consumerPhone: '0856789012', consumerLocation: 'Mitchells Plain', fraudIndicators: ['Confidence score below threshold (0.22)'], isFraud: false, createdAt: '2026-07-21' },
+        { id: 'f1', entryNumber: 12, consumerName: 'John Doe', consumerPhone: '0812345678', consumerLocation: 'Khayelitsha', fraudIndicators: ['Multiple entries from same phone (3 entries)', 'Same till slip reused'], isFraud: true, createdAt: '2026-07-18' },
+        { id: 'f2', entryNumber: 45, consumerName: 'Jane Smith', consumerPhone: '0823456789', consumerLocation: 'Gugulethu', fraudIndicators: ['Suspicious slip pattern', 'Amount mismatch'], isFraud: true, createdAt: '2026-07-19' },
+        { id: 'f3', entryNumber: 78, consumerName: 'Bob Wilson', consumerPhone: '0812345678', consumerLocation: 'Khayelitsha', fraudIndicators: ['Multiple entries from same phone (3 entries)', 'Different store names same slip'], isFraud: true, createdAt: '2026-07-19' },
+        { id: 'f4', entryNumber: 102, consumerName: 'Alice Brown', consumerPhone: '0834567890', consumerLocation: 'Nyanga', fraudIndicators: ['Confidence score below threshold (0.15)'], isFraud: false, createdAt: '2026-07-20' },
+        { id: 'f5', entryNumber: 135, consumerName: 'Peter Zulu', consumerPhone: '0845678901', consumerLocation: 'Langa', fraudIndicators: ['Multiple entries same phone (2 entries)', 'Same date/time on different slips'], isFraud: true, createdAt: '2026-07-20' },
+        { id: 'f6', entryNumber: 168, consumerName: 'Mary Nkosi', consumerPhone: '0856789012', consumerLocation: 'Mitchells Plain', fraudIndicators: ['Confidence score below threshold (0.22)'], isFraud: false, createdAt: '2026-07-21' },
       ]);
     } finally {
       setFraudLoading(false);
@@ -378,9 +378,9 @@ export default function AdminDashboard() {
     } catch {
       // Mock winners
       setWinners([
-        { id: 'w1', entryId: 'entry-5', entryNumber: 'CT-00005', consumerName: 'Thabo Mkhize', consumerPhone: '0811111111', consumerLocation: 'Khayelitsha', prize: 'Champion Toffees Hamper', drawnAt: '2026-07-15T14:00:00Z' },
-        { id: 'w2', entryId: 'entry-23', entryNumber: 'CT-00023', consumerName: 'Nomsa Dlamini', consumerPhone: '0822222222', consumerLocation: 'Gugulethu', prize: 'Champion Toffees Hamper', drawnAt: '2026-07-15T14:00:00Z' },
-        { id: 'w3', entryId: 'entry-89', entryNumber: 'CT-00089', consumerName: 'Sipho Ndaba', consumerPhone: '0833333333', consumerLocation: 'Nyanga', prize: 'Champion Toffees Hamper', drawnAt: '2026-07-15T14:00:00Z' },
+        { id: 'w1', entryId: 'entry-5', entryNumber: 5, consumerName: 'Thabo Mkhize', consumerPhone: '0811111111', consumerLocation: 'Khayelitsha', prize: 'Champion Toffees Hamper', drawnAt: '2026-07-15T14:00:00Z' },
+        { id: 'w2', entryId: 'entry-23', entryNumber: 23, consumerName: 'Nomsa Dlamini', consumerPhone: '0822222222', consumerLocation: 'Gugulethu', prize: 'Champion Toffees Hamper', drawnAt: '2026-07-15T14:00:00Z' },
+        { id: 'w3', entryId: 'entry-89', entryNumber: 89, consumerName: 'Sipho Ndaba', consumerPhone: '0833333333', consumerLocation: 'Nyanga', prize: 'Champion Toffees Hamper', drawnAt: '2026-07-15T14:00:00Z' },
       ]);
     } finally {
       setWinnersLoading(false);
@@ -444,7 +444,7 @@ export default function AdminDashboard() {
       const newWinners: WinnerData[] = Array.from({ length: numberOfWinners }, (_, i) => ({
         id: `w-new-${i + 1}`,
         entryId: `entry-${Math.floor(Math.random() * 800) + 1}`,
-        entryNumber: `CT-${String(Math.floor(Math.random() * 800) + 1).padStart(5, '0')}`,
+        entryNumber: Math.floor(Math.random() * 800) + 1,
         consumerName: `Winner ${i + 1}`,
         consumerPhone: `08${String(Math.floor(Math.random() * 900000000 + 100000000))}`,
         consumerLocation: ['Khayelitsha', 'Gugulethu', 'Nyanga', 'Langa'][i % 4],
