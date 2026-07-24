@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { QRCodeSVG } from 'qrcode.react';
 import {
   Trophy,
   Camera,
@@ -33,6 +34,8 @@ import {
   Send,
   Paperclip,
   RefreshCw,
+  QrCode,
+  X,
 } from 'lucide-react';
 
 // ─── Types ───
@@ -349,6 +352,7 @@ export default function ChampionChatPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showStoreDropdown, setShowStoreDropdown] = useState(false);
+  const [showQRModal, setShowQRModal] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -812,9 +816,89 @@ export default function ChampionChatPage() {
                 #{entryData.entryNumber}
               </span>
             )}
+            <button
+              onClick={() => setShowQRModal(true)}
+              className="p-2 rounded-full transition-colors hover:bg-white/20"
+              title="Show QR Code"
+            >
+              <QrCode size={20} className="text-white" />
+            </button>
           </div>
         </div>
       </header>
+
+      {/* ─── QR Code Modal ─── */}
+      <AnimatePresence>
+        {showQRModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center"
+            style={{ background: 'rgba(0,0,0,0.6)' }}
+            onClick={() => setShowQRModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.8, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+              className="rounded-2xl shadow-2xl p-6 max-w-sm w-full mx-4"
+              style={{ background: '#fff' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold" style={{ color: BRAND.text }}>
+                  Scan to Enter Competition
+                </h3>
+                <button onClick={() => setShowQRModal(false)} className="p-1 rounded-full hover:bg-gray-100">
+                  <X size={20} style={{ color: '#666' }} />
+                </button>
+              </div>
+
+              <div className="flex flex-col items-center gap-4">
+                <div className="p-4 rounded-xl" style={{ background: BRAND.cream }}>
+                  <QRCodeSVG
+                    value={typeof window !== 'undefined' ? window.location.href : 'https://champion-toffees-competition-f8tl.vercel.app'}
+                    size={200}
+                    bgColor={BRAND.cream}
+                    fgColor={BRAND.text}
+                    level="M"
+                    includeMargin={false}
+                  />
+                </div>
+
+                <p className="text-sm text-center font-medium" style={{ color: BRAND.text }}>
+                  Champion Toffees "Buy, Snap, Win!" Competition
+                </p>
+                <p className="text-xs text-center" style={{ color: '#888' }}>
+                  Scan this QR code with your phone camera to open the competition chat bot and enter to win!
+                </p>
+
+                <div className="flex gap-3 w-full">
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(typeof window !== 'undefined' ? window.location.href : 'https://champion-toffees-competition-f8tl.vercel.app');
+                    }}
+                    className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium flex-1"
+                    style={{ background: BRAND.cream, color: BRAND.goldDark, border: `1px solid ${BRAND.gold}40` }}
+                  >
+                    <Copy size={16} />
+                    Copy Link
+                  </button>
+                  <button
+                    onClick={() => setShowQRModal(false)}
+                    className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium flex-1"
+                    style={{ background: BRAND.headerBg, color: 'white' }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ─── Chat Background Pattern (WhatsApp-style) ─── */}
       <div

@@ -26,8 +26,35 @@ function buildStoreListForPrompt(storeNames: string[]): string {
   return storeNames.map((name, i) => `${i + 1}. ${name}`).join('\n');
 }
 
+// Auto-ensure tables exist
+async function ensureTablesExist(): Promise<boolean> {
+  try {
+    await db.competitionEntry.count({ take: 1 });
+    return true;
+  } catch {
+    console.log('[upload] Tables not found, running auto-setup...');
+    try {
+      const setupResponse = await fetch(`${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000'}/api/setup`);
+      if (!setupResponse.ok) return false;
+      console.log('[upload] Auto-setup completed');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
+    // Ensure database tables exist
+    const tablesReady = await ensureTablesExist();
+    if (!tablesReady) {
+      return NextResponse.json(
+        { error: 'Database setup is required. Please visit /api/setup first.' },
+        { status: 503 }
+      );
+    }
+
     const body = await request.json();
     const { entryId, imageBase64 } = body;
 
@@ -203,15 +230,16 @@ Respond ONLY with a JSON object in this exact format:
         storeName,
         slipDate,
         slipAmount,
-        championProducts,
-        confidence: confidenceScore,
+        championProducts: championProducts ? championProducts.split(',').map(p => p.trim()) : [],
+        confidence: Number(confidenceScore) / 100,
         isFraud,
       },
     });
   } catch (error) {
     console.error('Error uploading/validating:', error);
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { error: 'Failed to process upload' },
+      { error: `Failed to process upload: ${errorMsg}` },
       { status: 500 }
     );
   }
