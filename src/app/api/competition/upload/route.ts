@@ -288,16 +288,20 @@ Respond ONLY with a JSON object in this exact format (no markdown fences, no ext
     } catch (vlmError) {
       const errMsg = vlmError instanceof Error ? vlmError.message : String(vlmError);
       console.error('[upload] VLM analysis error:', errMsg);
-      // Don't silently set "pending" — give user a clear error
+      // All VLM errors result in "pending" status — the batch validation script
+      // (run from the Z.ai platform) will process these entries later
       if (errMsg.includes('Configuration file not found') || errMsg.includes('ZAI SDK initialization failed')) {
         validationResult = 'pending';
-        validationReason = 'AI validation is being set up — please try again in a few minutes';
-      } else if (errMsg.includes('timeout') || errMsg.includes('429') || errMsg.includes('rate limit')) {
+        validationReason = 'AI validation is being set up — your entry will be reviewed shortly';
+      } else if (errMsg.includes('fetch failed') || errMsg.includes('Connect Timeout') || errMsg.includes('timeout')) {
+        validationResult = 'pending';
+        validationReason = 'Your till slip is being reviewed — validation will be completed within 30 minutes';
+      } else if (errMsg.includes('429') || errMsg.includes('rate limit')) {
         validationResult = 'pending';
         validationReason = 'AI validation is busy — your entry will be reviewed shortly';
       } else {
         validationResult = 'pending';
-        validationReason = 'AI validation temporarily unavailable — your entry will be manually reviewed';
+        validationReason = 'Your till slip is under review — results will be available shortly';
       }
     }
 

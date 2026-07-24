@@ -39,7 +39,7 @@ import {
 } from 'lucide-react';
 
 // ─── Types ───
-type ChatPhase = 'greeting' | 'askDob' | 'askFirstName' | 'askSurname' | 'askTraderName' | 'askStoreAddress' | 'askWholesale' | 'askPhone' | 'confirmDetails' | 'askSlip' | 'validating' | 'resultConfirmed' | 'resultRejected' | 'resultDuplicate' | 'startOver';
+type ChatPhase = 'greeting' | 'askDob' | 'askFirstName' | 'askSurname' | 'askTraderName' | 'askStoreAddress' | 'askWholesale' | 'askPhone' | 'confirmDetails' | 'askSlip' | 'validating' | 'resultConfirmed' | 'resultRejected' | 'resultDuplicate' | 'resultPending' | 'startOver';
 
 interface ChatMessage {
   id: string;
@@ -66,7 +66,7 @@ interface EntryData {
 }
 
 interface ValidationResult {
-  result: 'confirmed' | 'rejected' | 'duplicate';
+  result: 'confirmed' | 'rejected' | 'duplicate' | 'pending';
   reason: string;
   storeName: string;
   slipDate: string;
@@ -442,6 +442,7 @@ export default function ChampionChatPage() {
       resultConfirmed: null,
       resultRejected: null,
       resultDuplicate: null,
+      resultPending: null,
       startOver: null,
     };
 
@@ -602,6 +603,33 @@ export default function ChampionChatPage() {
         } else {
           addUserMessage(value);
           await addBotMessage('🎉 You\'re all set! Keep buying Champion Toffees for more chances to win!\n\nType "again" to enter with a new slip.');
+        }
+        break;
+
+      case 'resultPending':
+        addUserMessage(value);
+        if (value.toLowerCase().includes('check') && entryData?.id) {
+          // Check entry status
+          try {
+            const res = await fetch(`/api/competition/status/${entryData.id}`);
+            const data = await res.json();
+            const status = data.entry?.validationResult;
+            if (status === 'confirmed') {
+              setPhase('resultConfirmed');
+              await addBotMessage('🎉 Great news! Your entry has been CONFIRMED! ✅ Your Champion Toffees purchase has been verified.');
+            } else if (status === 'rejected') {
+              setPhase('resultRejected');
+              await addBotMessage(`❌ Your entry was not validated: ${data.entry?.validationReason || 'No Champion products found.'}`);
+            } else {
+              await addBotMessage('⏳ Your entry is still being reviewed. Please check back in a few minutes.');
+            }
+          } catch {
+            await addBotMessage('⏳ Could not check status right now. Please try again in a few minutes.');
+          }
+        } else if (value.toLowerCase().includes('again')) {
+          handleStartOver();
+        } else {
+          await addBotMessage('⏳ Your entry is still under review. Type "check" to re-check your status, or "again" to submit a new entry.');
         }
         break;
 
@@ -767,6 +795,16 @@ export default function ChampionChatPage() {
           'result',
           { resultData: validation }
         );
+      } else if (validation.result === 'pending') {
+        setPhase('resultPending');
+        await addBotMessage(
+          `⏳ Your entry is being reviewed!\n\nEntry #${entryData?.entryNumber || ''}\n\n${validation.reason || 'Our AI is validating your till slip. This usually takes a few minutes.'}\n\nWe'll confirm your entry once the validation is complete. You can check back later or wait for our confirmation.`,
+          'result',
+          { resultData: validation }
+        );
+        await addBotMessage(
+          `📱 Tip: Save your entry number and check the status later. Validations are typically processed within 30 minutes during business hours.\n\nType "again" to enter with a new slip, or "check" to re-check your entry status.`
+        );
       } else {
         setPhase('resultRejected');
         await addBotMessage(
@@ -820,6 +858,7 @@ export default function ChampionChatPage() {
       case 'resultConfirmed': return 'Type "again" for new entry...';
       case 'resultRejected': return 'Type "try again"...';
       case 'resultDuplicate': return 'Type "try again"...';
+      case 'resultPending': return 'Type "check" for status...';
       default: return 'Type a message...';
     }
   };
@@ -828,7 +867,7 @@ export default function ChampionChatPage() {
   const canType = !['validating', 'greeting'].includes(phase) && !isSubmitting && !isTyping;
 
   // ─── Show attachment button? ───
-  const showAttach = phase === 'askSlip' || phase === 'resultRejected' || phase === 'resultDuplicate';
+  const showAttach = phase === 'askSlip' || phase === 'resultRejected' || phase === 'resultDuplicate' || phase === 'resultPending';
 
   // ─── Show send button? ───
   const showSend = canType && phase !== 'askSlip';
@@ -854,7 +893,7 @@ export default function ChampionChatPage() {
           <div className="flex-1 min-w-0">
             <h1 className="text-white font-bold text-lg truncate">Champion Toffees</h1>
             <p className="text-white/70 text-xs">
-              {isTyping ? 'typing...' : isSubmitting ? 'processing...' : phase === 'validating' ? 'validating slip...' : 'online'}
+              {isTyping ? 'typing...' : isSubmitting ? 'processing...' : phase === 'validating' ? 'validating slip...' : phase === 'resultPending' ? 'under review...' : 'online'}
             </p>
           </div>
           <div className="flex items-center gap-2">
