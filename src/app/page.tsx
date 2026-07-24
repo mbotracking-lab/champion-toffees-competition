@@ -1364,7 +1364,7 @@ export default function ChampionCompetitionPage() {
                   {entryData?.consumerLocation}
                 </span>
               </div>
-              {validationResult?.championProducts?.length > 0 && (
+              {validationResult?.championProducts && validationResult.championProducts.length > 0 && (
                 <div className="flex items-center justify-between">
                   <span style={{ color: '#888' }}>Products</span>
                   <div className="flex flex-wrap gap-1">

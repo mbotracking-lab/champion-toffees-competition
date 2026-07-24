@@ -2,6 +2,30 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import ZAI from 'z-ai-web-dev-sdk';
 
+interface ValidationResult {
+  result: 'confirmed' | 'rejected' | 'duplicate';
+  reason: string;
+  storeName: string;
+  slipDate: string;
+  slipAmount: string;
+  championProducts: string[];
+  confidence: number;
+  isFraud: boolean;
+}
+
+async function getParticipatingStoreNames(): Promise<string[]> {
+  const stores = await db.participatingStore.findMany({
+    select: { name: true, region: true },
+    orderBy: { name: 'asc' },
+  });
+  return stores.map(s => s.name);
+}
+
+function buildStoreListForPrompt(storeNames: string[]): string {
+  if (storeNames.length === 0) return '';
+  return storeNames.map((name, i) => `${i + 1}. ${name}`).join('\n');
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -25,6 +49,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Get participating stores for VLM validation
+    const participatingStoreNames = await getParticipatingStoreNames();
+    const storeList = buildStoreListForPrompt(participatingStoreNames);
+
     await db.competitionEntry.update({
       where: { id: entryId },
       data: { slipPhotoData: imageBase64 },
@@ -41,31 +69,37 @@ export async function POST(request: NextRequest) {
     try {
       const zai = await ZAI.create();
       const vlmResponse = await zai.chat.completions.createVision({
+        model: 'glm-4v-plus',
         messages: [
           {
             role: 'user',
             content: [
               {
                 type: 'text',
-                text: `Analyze this till slip/receipt image carefully. Extract the following information and respond ONLY in this exact JSON format (no other text):
+                text: `You are an AI receipt/till slip validator for a Champion Toffees competition in South Africa. Analyze this till slip/receipt image carefully and respond ONLY with a JSON object (no markdown, no explanation).
 
+Check for:
+1. Is this a valid South African store receipt/till slip?
+2. Does the store name on the receipt match one of the PARTICIPATING STORES listed below? (Allow for minor variations like abbreviations, different spacing, or partial names)
+3. Does it contain any Champion Toffees or Champion Sweets products?
+4. Is this receipt authentic (not fabricated, edited, or a screenshot)?
+
+PARTICIPATING STORES (only these stores are eligible):
+${storeList}
+
+Respond ONLY with a JSON object in this exact format:
 {
   "isReceipt": true/false,
-  "storeName": "the name of the store/shop",
-  "date": "the date on the receipt in YYYY-MM-DD format, or empty if not found",
-  "totalAmount": "the total amount paid, as a number string",
+  "isFromParticipatingStore": true/false,
+  "storeName": "the store name found",
+  "matchedParticipatingStore": "matching participating store name if found",
+  "date": "date in YYYY-MM-DD format",
+  "totalAmount": "total amount as string",
   "hasChampionProducts": true/false,
-  "championProductNames": "names of any Champion/Champion Toffees products found, or empty string",
-  "confidence": "your confidence level as a percentage 0-100",
-  "rejectionReason": "reason if rejected, or empty string if valid"
-}
-
-Rules:
-- isReceipt should be true only if this is clearly a retail store receipt/till slip
-- hasChampionProducts should be true if you can identify any product named "Champion" or "Champion Toffees" on the receipt
-- confidence should reflect how certain you are about your analysis
-- rejectionReason should explain why if the receipt is invalid (e.g. "Not a valid receipt", "No Champion products found", "Image is unclear")
-- If Champion products are found, list their names in championProductNames`,
+  "championProductNames": "names of Champion products found",
+  "confidence": "0-100 confidence score",
+  "rejectionReason": "reason if rejected, empty string if valid"
+}`,
               },
               {
                 type: 'image_url',
@@ -82,7 +116,7 @@ Rules:
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
 
-        storeName = parsed.storeName || '';
+        storeName = parsed.matchedParticipatingStore || parsed.storeName || '';
         slipDate = parsed.date || '';
         slipAmount = parsed.totalAmount || '';
         championProducts = parsed.championProductNames || '';
@@ -91,12 +125,15 @@ Rules:
         if (!parsed.isReceipt) {
           validationResult = 'rejected';
           validationReason = parsed.rejectionReason || 'Not a valid receipt';
+        } else if (parsed.isFromParticipatingStore === false) {
+          validationResult = 'rejected';
+          validationReason = `The store "${parsed.storeName || 'unknown'}" is not a participating store in this competition. Only receipts from eligible stores qualify.`;
         } else if (!parsed.hasChampionProducts) {
           validationResult = 'rejected';
           validationReason = 'No Champion products found on the till slip';
         } else {
           validationResult = 'confirmed';
-          validationReason = 'Champion products verified on till slip';
+          validationReason = 'Champion products verified on till slip from participating store';
         }
       } else {
         validationResult = 'rejected';
