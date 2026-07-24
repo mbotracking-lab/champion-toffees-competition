@@ -1,0 +1,98 @@
+import { NextResponse } from 'next/server';
+import { readdirSync, readFileSync, statSync } from 'fs';
+import { join } from 'path';
+import os from 'os';
+
+// Diagnostic endpoint to debug ZAI config file issues on Vercel
+export async function GET() {
+  const cwd = process.cwd();
+  const homeDir = os.homedir();
+  
+  const diagnostics: Record<string, any> = {
+    cwd,
+    homeDir,
+    envVars: {
+      ZAI_BASE_URL: process.env.ZAI_BASE_URL || 'NOT SET',
+      ZAI_API_KEY: process.env.ZAI_API_KEY ? 'SET (hidden)' : 'NOT SET',
+      ZAI_TOKEN: process.env.ZAI_TOKEN ? 'SET (hidden)' : 'NOT SET',
+      ZAI_USER_ID: process.env.ZAI_USER_ID || 'NOT SET',
+      ZAI_CHAT_ID: process.env.ZAI_CHAT_ID || 'NOT SET',
+    },
+    configFileChecks: {},
+  };
+
+  // Check all paths where ZAI SDK looks for config
+  const configPaths = [
+    join(cwd, '.z-ai-config'),
+    join(homeDir, '.z-ai-config'),
+    '/etc/.z-ai-config',
+  ];
+
+  for (const p of configPaths) {
+    try {
+      const stat = statSync(p);
+      const content = readFileSync(p, 'utf-8');
+      const parsed = JSON.parse(content);
+      diagnostics.configFileChecks[p] = {
+        exists: true,
+        size: stat.size,
+        hasBaseUrl: Boolean(parsed.baseUrl),
+        hasApiKey: Boolean(parsed.apiKey),
+        baseUrl: String(parsed.baseUrl || ''),
+      };
+    } catch (e) {
+      diagnostics.configFileChecks[p] = {
+        exists: false,
+        error: e instanceof Error ? e.message : String(e),
+      };
+    }
+  }
+
+  // Check what files are in cwd
+  try {
+    const cwdFiles = readdirSync(cwd);
+    diagnostics.cwdFiles = cwdFiles.filter(f => f.startsWith('.z-ai') || f.startsWith('.env') || f === 'package.json');
+  } catch (e) {
+    diagnostics.cwdFilesError = e instanceof Error ? e.message : String(e);
+  }
+
+  // Try initializing ZAI and capture the result
+  try {
+    const ZAI = (await import('z-ai-web-dev-sdk')).default;
+    
+    // Strategy 1: Direct constructor from config file
+    try {
+      const configStr = readFileSync(join(cwd, '.z-ai-config'), 'utf-8');
+      const configObj = JSON.parse(configStr);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const zaiDirect = new (ZAI as any)(configObj);
+      diagnostics.directConstructor = {
+        success: true,
+        configKeys: Object.keys(zaiDirect),
+      };
+    } catch (e) {
+      diagnostics.directConstructor = {
+        success: false,
+        error: e instanceof Error ? e.message : String(e),
+      };
+    }
+
+    // Strategy 2: ZAI.create()
+    try {
+      const zaiCreate = await ZAI.create();
+      diagnostics.zaiCreate = {
+        success: true,
+        configKeys: Object.keys(zaiCreate),
+      };
+    } catch (e) {
+      diagnostics.zaiCreate = {
+        success: false,
+        error: e instanceof Error ? e.message : String(e),
+      };
+    }
+  } catch (e) {
+    diagnostics.zaiImportError = e instanceof Error ? e.message : String(e);
+  }
+
+  return NextResponse.json(diagnostics);
+}
