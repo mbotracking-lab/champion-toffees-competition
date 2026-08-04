@@ -204,12 +204,12 @@ async function handleTextMessage(phoneNumber: string, text: string) {
     case 'idle':
       await sendWhatsAppMessage(
         phoneNumber,
-        'Hey there! Welcome to the *Champion \u2014 Upgrade Your Hustle* competition! \uD83C\uDFC6\n\n'
+        '*Hey there! Welcome to Champion \u2014 Upgrade Your Hustle!* \uD83C\uDFC6\n\n'
         + 'Here\'s how it works:\n'
-        + '\uD83D\uDED2 *Buy* any 2 Champion or Candy Tops products\n'
-        + '\uD83D\uDCF7 *Snap* your till slip and send it here\n'
-        + '\uD83C\uDF89 *Win* R1 000 cash every week + R20 000 in grand prizes!\n\n'
-        + 'Ready to enter? Send "*Start*" or "*Hi*" and let\'s go! \uD83D\uDE4C'
+        + '\uD83D\uDED2 Buy any 2 Champion or Candy Tops products\n'
+        + '\uD83D\uDCF8 Snap your till slip\n'
+        + '\uD83C\uDF89 Win *R1 000 cash* every week + *R20 000* in grand prizes!\n\n'
+        + 'Ready? Just send "*Start*" or "*Hi*" and we\'ll get you entered! \uD83D\uDE4C'
       );
       break;
 
@@ -434,17 +434,17 @@ async function handleImageMessage(phoneNumber: string, imageId: string) {
         + `You\'re now eligible for our *R1 000 weekly cash prize* and the *R20 000 grand prize*! \uD83C\uDF89\n\n`
         + `Buy more Champion products for more chances. Good luck! \uD83C\uDFC6`
       );
+    } else if (result.result === 'rejected' && result.isDuplicate) {
+      await sendWhatsAppMessage(
+        phoneNumber,
+        `*\u26A0\ufe0f We\'ve already seen this slip*\n\n${result.reason}\n\n`
+        + `Each till slip can only be entered once, but you can try with a different one! Send "*Start*". \uD83D\uDE0A`
+      );
     } else if (result.result === 'rejected') {
       await sendWhatsAppMessage(
         phoneNumber,
         `*\u274C Not quite right*\n\n${result.reason}\n\n`
         + `No stress \u2014 grab another slip and send "*Start*" to try again. \uD83D\uDE4A`
-      );
-    } else if (result.result === 'duplicate') {
-      await sendWhatsAppMessage(
-        phoneNumber,
-        `*\u26A0\ufe0f We\'ve already seen this slip*\n\n${result.reason}\n\n`
-        + `Each till slip can only be entered once, but you can try with a different one! Send "*Start*". \uD83D\uDE0A`
       );
     } else {
       await sendWhatsAppMessage(
@@ -525,18 +525,19 @@ async function validateTillSlip(
   entryId: string,
   imageBase64: string
 ): Promise<{
-    result: 'confirmed' | 'rejected' | 'duplicate' | 'pending';
+    result: 'confirmed' | 'rejected' | 'pending';
     reason: string;
     storeName: string;
     slipDate: string;
     slipAmount: string;
     championProducts: string;
     confidence: number;
+    isDuplicate: boolean;
   }> {
   let defaultResult = {
     result: 'pending' as const,
     reason: 'Validation in progress \u2014 check back shortly.',
-    storeName: '', slipDate: '', slipAmount: '', championProducts: '', confidence: 0,
+    storeName: '', slipDate: '', slipAmount: '', championProducts: '', confidence: 0, isDuplicate: false,
   };
 
   const entry = await db.competitionEntry.findUnique({ where: { id: entryId } });
@@ -667,7 +668,7 @@ Respond ONLY with a JSON object in this exact format (no markdown fences, no ext
       },
     });
 
-    return { result: validationResult, reason: validationReason, storeName, slipDate, slipAmount, championProducts, confidence: Number(confidenceScore) / 100 };
+    return { result: validationResult, reason: validationReason, storeName, slipDate, slipAmount, championProducts, confidence: Number(confidenceScore) / 100, isDuplicate };
   } catch (vlmError) {
     const errMsg = vlmError instanceof Error ? vlmError.message : String(vlmError);
     console.error('[webhook] VLM error:', errMsg);
@@ -701,10 +702,10 @@ async function checkEntryStatus(phoneNumber: string) {
     }
 
     const statusEmoji =
-      latestEntry.validationResult === 'confirmed' ? '\u2705'
-        : latestEntry.validationResult === 'rejected' ? '\u274C'
-          : latestEntry.validationResult === 'rejected' && latestEntry.isDuplicate ? '\u26A0\ufe0f'
-            : '\u23F3';
+      latestEntry.validationResult === 'confirmed' ? '✅'
+        : latestEntry.isDuplicate ? '⚠️'
+          : latestEntry.validationResult === 'rejected' ? '❌'
+            : '⏳';
 
     await sendWhatsAppMessage(
       phoneNumber,
@@ -732,9 +733,12 @@ async function startNewEntry(phoneNumber: string) {
 
   await sendWhatsAppMessage(
     phoneNumber,
-    '*Champion \u2014 Upgrade Your Hustle* \uD83C\uDFC6\n\n'
-    + 'Awesome, let\'s get you entered! Just a few quick questions.\n\n'
-    + 'What\'s your *full name*?'
+    '*Hey there! Welcome to Champion \u2014 Upgrade Your Hustle!* \uD83C\uDFC6\n\n'
+    + 'Here\'s how it works:\n'
+    + '\uD83D\uDED2 Buy any 2 Champion or Candy Tops products\n'
+    + '\uD83D\uDCF8 Snap your till slip\n'
+    + '\uD83C\uDF89 Win *R1 000 cash* every week + *R20 000* in grand prizes!\n\n'
+    + "Let\'s get you entered! What\'s your *full name*?"
   );
 }
 
