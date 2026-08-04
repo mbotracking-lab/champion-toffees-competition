@@ -625,6 +625,7 @@ Respond ONLY with a JSON object in this exact format (no markdown fences, no ext
     }
 
     // Duplicate detection
+    let isDuplicate = false;
     if (validationResult === 'confirmed') {
       const duplicate = await db.competitionEntry.findFirst({
         where: {
@@ -637,7 +638,8 @@ Respond ONLY with a JSON object in this exact format (no markdown fences, no ext
         },
       });
       if (duplicate) {
-        validationResult = 'duplicate';
+        isDuplicate = true;
+        validationResult = 'rejected';
         validationReason = 'This till slip has already been submitted.';
       }
     }
@@ -661,7 +663,7 @@ Respond ONLY with a JSON object in this exact format (no markdown fences, no ext
         validated: validationResult === 'confirmed',
         validationResult, validationReason, storeName, slipDate, slipAmount,
         championProducts, confidenceScore,
-        isDuplicate: validationResult === 'duplicate', isFraud,
+        isDuplicate, isFraud,
       },
     });
 
@@ -701,7 +703,7 @@ async function checkEntryStatus(phoneNumber: string) {
     const statusEmoji =
       latestEntry.validationResult === 'confirmed' ? '\u2705'
         : latestEntry.validationResult === 'rejected' ? '\u274C'
-          : latestEntry.validationResult === 'duplicate' ? '\u26A0\ufe0f'
+          : latestEntry.validationResult === 'rejected' && latestEntry.isDuplicate ? '\u26A0\ufe0f'
             : '\u23F3';
 
     await sendWhatsAppMessage(

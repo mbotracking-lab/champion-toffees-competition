@@ -5,7 +5,7 @@ import { createZAI } from '@/lib/zai';
 import { getDatabaseUrl } from '@/lib/config';
 
 interface ValidationResult {
-  result: 'confirmed' | 'rejected' | 'duplicate';
+  result: 'confirmed' | 'rejected' | 'pending';
   reason: string;
   storeName: string;
   slipDate: string;
@@ -13,6 +13,7 @@ interface ValidationResult {
   championProducts: string[];
   confidence: number;
   isFraud: boolean;
+  isDuplicate: boolean;
 }
 
 async function getParticipatingStoreNames(): Promise<string[]> {
@@ -306,6 +307,7 @@ Respond ONLY with a JSON object in this exact format (no markdown fences, no ext
     }
 
     // Duplicate detection
+    let isDuplicate = false;
     if (validationResult === 'confirmed') {
       const duplicate = await db.competitionEntry.findFirst({
         where: {
@@ -320,7 +322,8 @@ Respond ONLY with a JSON object in this exact format (no markdown fences, no ext
       });
 
       if (duplicate) {
-        validationResult = 'duplicate';
+        isDuplicate = true;
+        validationResult = 'rejected';
         validationReason = 'This till slip has already been submitted';
       }
     }
@@ -352,7 +355,7 @@ Respond ONLY with a JSON object in this exact format (no markdown fences, no ext
         slipAmount,
         championProducts,
         confidenceScore,
-        isDuplicate: validationResult === 'duplicate',
+        isDuplicate,
         isFraud,
       },
     });
@@ -368,6 +371,7 @@ Respond ONLY with a JSON object in this exact format (no markdown fences, no ext
         championProducts: championProducts ? championProducts.split(',').map(p => p.trim()) : [],
         confidence: Number(confidenceScore) / 100,
         isFraud,
+        isDuplicate,
       },
     });
   } catch (error) {

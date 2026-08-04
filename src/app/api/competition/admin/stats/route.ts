@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { neon } from '@neon-database/serverless';
+import { neon } from '@neondatabase/serverless';
 import { getDatabaseUrl } from '@/lib/config';
 
 export async function GET() {

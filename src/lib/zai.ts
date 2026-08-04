@@ -1,6 +1,5 @@
 import ZAI from 'z-ai-web-dev-sdk';
 import { readFileSync } from 'fs';
-import { join } from 'path';
 
 /**
  * Create a ZAI SDK instance that works on both Vercel and local environments.
@@ -29,13 +28,13 @@ export async function createZAI(): Promise<ZAI> {
     return new (ZAI as any)(config) as ZAI;
   }
 
-  // Strategy 2: Read .z-ai-config file from project root and construct directly
-  // This works on Vercel where the file is deployed with the project,
-  // even though ZAI.create() might not find it at process.cwd()
+  // Strategy 2: Read .z-ai-config file from fixed locations
+  // Use static paths to avoid Turbopack "very dynamic requires" errors
   try {
-    // Try multiple locations where the file might be
     const configPaths = [
-      join(process.cwd(), '.z-ai-config'),
+      // process.cwd() is fine at runtime, but we avoid path.join(process.cwd(), dynamicVar)
+      // which Turbopack can't statically analyze. Inline the path concatenation instead.
+      process.cwd() + '/.z-ai-config',
       '/etc/.z-ai-config',
     ];
 
