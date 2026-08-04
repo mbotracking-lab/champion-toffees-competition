@@ -27,7 +27,6 @@ import {
   Ban,
   Image as ImageIcon,
   Store,
-  CalendarDays,
   Home,
   User,
   ChevronDown,
@@ -39,7 +38,7 @@ import {
 } from 'lucide-react';
 
 // ─── Types ───
-type ChatPhase = 'greeting' | 'askDob' | 'askFirstName' | 'askSurname' | 'askTraderName' | 'askStoreAddress' | 'askWholesale' | 'askPhone' | 'confirmDetails' | 'askSlip' | 'validating' | 'resultConfirmed' | 'resultRejected' | 'resultDuplicate' | 'resultPending' | 'startOver';
+type ChatPhase = 'greeting' | 'askFullName' | 'askTraderName' | 'askStoreAddress' | 'askWholesale' | 'askPhone' | 'confirmDetails' | 'askSlip' | 'validating' | 'resultConfirmed' | 'resultRejected' | 'resultDuplicate' | 'resultPending' | 'startOver';
 
 interface ChatMessage {
   id: string;
@@ -56,13 +55,11 @@ interface ChatMessage {
 interface EntryData {
   id: string;
   entryNumber: string;
-  firstName: string;
-  surname: string;
+  fullName: string;
   traderName: string;
   storeAddress: string;
   wholesaleStore: string;
   consumerPhone: string;
-  dateOfBirth: string;
 }
 
 interface ValidationResult {
@@ -104,16 +101,14 @@ const BRAND = {
 
 // ─── Chat Flow Definition ───
 const CHAT_FLOW: { phase: ChatPhase; botMessage: string }[] = [
-  { phase: 'greeting', botMessage: '👋 Welcome to the Champion Toffees "Buy, Snap, Win!" Competition!\n\nPurchase Champion Toffees from a participating wholesale store, snap your till slip, and you could win amazing prizes!\n\nWe\'ll instantly verify your entry. Let\'s get you started! 🏆' },
-  { phase: 'askDob', botMessage: 'First, I need a few details from you.\n\nWhat is your Date of Birth? (DD/MM/YYYY)' },
-  { phase: 'askFirstName', botMessage: 'Great! ✅\n\nWhat is your First Name?' },
-  { phase: 'askSurname', botMessage: 'And what is your Surname?' },
-  { phase: 'askTraderName', botMessage: 'What is your Trader Name? (Your shop or business name)' },
-  { phase: 'askStoreAddress', botMessage: 'What is the Address of your store?' },
-  { phase: 'askWholesale', botMessage: 'Which Wholesale Store did you purchase Champions from?\n\nTap a store below or type the name:' },
-  { phase: 'askPhone', botMessage: 'Almost done! 📱\n\nWhat is your Phone Number? (e.g. 0821234567)' },
-  { phase: 'confirmDetails', botMessage: 'Let me confirm your details:' },
-  { phase: 'askSlip', botMessage: '✅ Your entry has been registered!\n\nNow please upload your till slip! 📸\n\nTake a photo or upload an image of your receipt showing the Champion products purchase.\n\nTap the 📎 button below to upload your slip.' },
+  { phase: 'greeting', botMessage: 'Hey there! Welcome to Champion — Upgrade Your Hustle! 🏆\n\nHere\'s how it works:\n🛒 Buy any 2 Champion or Candy Tops products\n📷 Snap your till slip\n🎉 Win R1 000 cash every week + R20 000 in grand prizes!\n\nLet\'s get you entered!' },
+  { phase: 'askFullName', botMessage: 'What\'s your full name?' },
+  { phase: 'askTraderName', botMessage: 'Nice! What\'s the name of the trader or spaza shop where you bought? (Type "N/A" if it\'s for yourself)' },
+  { phase: 'askStoreAddress', botMessage: 'And which area or address is the shop in? (e.g., "Khayelitsha Site C")' },
+  { phase: 'askWholesale', botMessage: 'Which wholesale store did you buy from?\n\nTap a store below or type the name:' },
+  { phase: 'askPhone', botMessage: 'Almost there! 🙌 What\'s the best phone number to reach you if you win?' },
+  { phase: 'confirmDetails', botMessage: 'Let me just confirm everything:' },
+  { phase: 'askSlip', botMessage: '' },
 ];
 
 // ─── Utility ───
@@ -123,16 +118,6 @@ function generateId() {
 
 function formatTime(date: Date) {
   return date.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', hour12: false });
-}
-
-function isValidDob(dob: string): boolean {
-  const regex = /^\d{2}\/\d{2}\/\d{4}$/;
-  if (!regex.test(dob)) return false;
-  const [dd, mm, yyyy] = dob.split('/').map(Number);
-  if (mm < 1 || mm > 12) return false;
-  if (dd < 1 || dd > 31) return false;
-  if (yyyy < 1900 || yyyy > new Date().getFullYear()) return false;
-  return true;
 }
 
 function formatPhone(value: string) {
@@ -335,9 +320,7 @@ export default function ChampionChatPage() {
   const [showConfetti, setShowConfetti] = useState(false);
 
   // Form data collected during chat
-  const [dateOfBirth, setDateOfBirth] = useState('');
-  const [firstName, setFirstName] = useState('');
-  const [surname, setSurname] = useState('');
+  const [fullName, setFullName] = useState('');
   const [traderName, setTraderName] = useState('');
   const [storeAddress, setStoreAddress] = useState('');
   const [wholesaleStore, setWholesaleStore] = useState('');
@@ -419,7 +402,7 @@ export default function ChampionChatPage() {
       // Kick off the greeting
       const timer = setTimeout(() => {
         addBotMessage(CHAT_FLOW[0].botMessage);
-        setPhase('askDob');
+        setPhase('askFullName');
       }, 500);
       return () => clearTimeout(timer);
     }
@@ -428,15 +411,13 @@ export default function ChampionChatPage() {
   // ─── Advance conversation after bot messages ───
   const advancePhase = useCallback((currentPhase: ChatPhase) => {
     const nextFlows: Record<ChatPhase, { phase: ChatPhase; botMessage: string } | null> = {
-      greeting: CHAT_FLOW[1], // askDob
-      askDob: CHAT_FLOW[2],   // askFirstName
-      askFirstName: CHAT_FLOW[3], // askSurname
-      askSurname: CHAT_FLOW[4],   // askTraderName
-      askTraderName: CHAT_FLOW[5], // askStoreAddress
-      askStoreAddress: CHAT_FLOW[6], // askWholesale
-      askWholesale: CHAT_FLOW[7],   // askPhone
+      greeting: CHAT_FLOW[1], // askFullName
+      askFullName: CHAT_FLOW[2], // askTraderName
+      askTraderName: CHAT_FLOW[3], // askStoreAddress
+      askStoreAddress: CHAT_FLOW[4], // askWholesale
+      askWholesale: CHAT_FLOW[5],   // askPhone
       askPhone: null, // will do confirmDetails
-      confirmDetails: CHAT_FLOW[9], // askSlip
+      confirmDetails: CHAT_FLOW[7], // askSlip
       askSlip: null,
       validating: null,
       resultConfirmed: null,
@@ -472,33 +453,21 @@ export default function ChampionChatPage() {
       addUserMessage(value);
       // Then ask phone
       setPhase('askPhone');
-      await addBotMessage(CHAT_FLOW[7].botMessage);
+      await addBotMessage(CHAT_FLOW[5].botMessage);
       return;
     }
 
     // Phase-specific handling
     switch (phase) {
-      case 'askDob':
-        if (!isValidDob(value)) {
+      case 'askFullName':
+        if (value.replace(/[^a-zA-Z\s'-]/g, '').trim().length < 3) {
           addUserMessage(value);
-          await addBotMessage('⚠️ That doesn\'t look like a valid date. Please enter your Date of Birth in DD/MM/YYYY format (e.g. 15/03/1985)');
+          await addBotMessage('That\'s a bit short — could you share your full name so we know who to contact if you win?');
           return;
         }
-        setDateOfBirth(value);
+        setFullName(value);
         addUserMessage(value);
-        advancePhase('askDob');
-        break;
-
-      case 'askFirstName':
-        setFirstName(value);
-        addUserMessage(value);
-        advancePhase('askFirstName');
-        break;
-
-      case 'askSurname':
-        setSurname(value);
-        addUserMessage(value);
-        advancePhase('askSurname');
+        advancePhase('askFullName');
         break;
 
       case 'askTraderName':
@@ -517,7 +486,7 @@ export default function ChampionChatPage() {
         const digits = value.replace(/\D/g, '');
         if (digits.length < 10) {
           addUserMessage(value);
-          await addBotMessage('⚠️ Please enter a valid phone number with at least 10 digits (e.g. 0821234567)');
+          await addBotMessage('Hmm, that doesn\'t look right. Could you double-check? 📞\nExample: 0721234567');
           return;
         }
         setPhone(digits);
@@ -526,31 +495,29 @@ export default function ChampionChatPage() {
         setPhase('confirmDetails');
         await addBotMessage('Let me confirm your details:', 'details', {
           details: {
-            'Date of Birth': dateOfBirth,
-            'First Name': firstName,
-            'Surname': surname,
+            'Name': fullName,
             'Trader Name': traderName,
             'Store Address': storeAddress,
             'Wholesale Store': wholesaleStore,
             'Phone': digits,
           },
         });
-        await addBotMessage('Are these details correct? Type "yes" to confirm or "no" to start over.');
+        await addBotMessage('Does that look right? Type "yes" to confirm or "no" to start over.');
         break;
 
       case 'confirmDetails':
         if (value.toLowerCase() === 'yes' || value.toLowerCase() === 'y') {
-          addUserMessage('Yes, that\'s correct! ✅');
+          addUserMessage('Looks good! ✅');
           // Register the entry
+          const nameParts = fullName.split(/\s+/);
           setIsSubmitting(true);
           try {
             const response = await fetch('/api/competition/entry', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                firstName,
-                surname,
-                dateOfBirth,
+                firstName: nameParts[0],
+                surname: nameParts.slice(1).join(' '),
                 consumerPhone: phone,
                 traderName,
                 storeAddress,
@@ -566,17 +533,15 @@ export default function ChampionChatPage() {
             setEntryData({
               id: entry.id,
               entryNumber: String(entry.entryNumber),
-              firstName,
-              surname,
+              fullName,
               traderName,
               storeAddress,
               wholesaleStore,
               consumerPhone: phone,
-              dateOfBirth,
             });
             // Ask for slip upload
             setPhase('askSlip');
-            await addBotMessage(`✅ Your entry has been registered! Entry #${entry.entryNumber}\n\nNow please upload your till slip! 📸\n\nTap the 📎 button below to take a photo or upload your receipt.`, 'text');
+            await addBotMessage(`*Entry #${entry.entryNumber} is in!* ✅\n\nNow send a *clear photo of your till slip*! 📸\n\nMake sure we can see:\n• The store name\n• The date\n• At least 2 Champion or Candy Tops products\n\nGood lighting helps! ☀️`, 'text');
           } catch (err) {
             const msg = err instanceof Error ? err.message : 'Something went wrong';
             await addBotMessage(`❌ Oops! ${msg}\n\nPlease try again.`);
@@ -585,15 +550,13 @@ export default function ChampionChatPage() {
           }
         } else {
           addUserMessage('No, let me start over.');
-          await addBotMessage('No worries! Let\'s start fresh. 🔄\n\nWhat is your Date of Birth? (DD/MM/YYYY)');
-          setDateOfBirth('');
-          setFirstName('');
-          setSurname('');
+          await addBotMessage('No sweat! Let\'s start fresh. 🔄\n\nWhat\'s your *full name*?');
+          setFullName('');
           setTraderName('');
           setStoreAddress('');
           setWholesaleStore('');
           setPhone('');
-          setPhase('askDob');
+          setPhase('askFullName');
         }
         break;
 
@@ -602,7 +565,7 @@ export default function ChampionChatPage() {
           handleStartOver();
         } else {
           addUserMessage(value);
-          await addBotMessage('🎉 You\'re all set! Keep buying Champion Toffees for more chances to win!\n\nType "again" to enter with a new slip.');
+          await addBotMessage('🎉 You\'re now eligible for our R1 000 weekly cash prize and the R20 000 grand prize!\n\nKeep buying Champion products for more chances to win. Good luck! 🏆\n\nType "again" to enter with a new slip, or share this with friends!');
         }
         break;
 
@@ -644,14 +607,14 @@ export default function ChampionChatPage() {
         addUserMessage(value);
         break;
     }
-  }, [inputValue, phase, dateOfBirth, firstName, surname, traderName, storeAddress, wholesaleStore, phone, stores, addBotMessage, addUserMessage, advancePhase, isSubmitting, entryData]);
+  }, [inputValue, phase, fullName, traderName, storeAddress, wholesaleStore, phone, stores, addBotMessage, addUserMessage, advancePhase, isSubmitting, entryData]);
 
   // ─── Handle store option tap ───
   const handleStoreSelect = useCallback(async (storeName: string) => {
     setWholesaleStore(storeName);
     addUserMessage(storeName);
     setPhase('askPhone');
-    await addBotMessage(CHAT_FLOW[7].botMessage);
+    await addBotMessage(CHAT_FLOW[5].botMessage);
   }, [addBotMessage, addUserMessage]);
 
   // ─── Handle image upload with compression ───
@@ -839,9 +802,7 @@ export default function ChampionChatPage() {
 
   // ─── Start Over ───
   const handleStartOver = useCallback(async () => {
-    setDateOfBirth('');
-    setFirstName('');
-    setSurname('');
+    setFullName('');
     setTraderName('');
     setStoreAddress('');
     setWholesaleStore('');
@@ -861,9 +822,7 @@ export default function ChampionChatPage() {
   // ─── Determine input placeholder ───
   const getInputPlaceholder = () => {
     switch (phase) {
-      case 'askDob': return 'DD/MM/YYYY';
-      case 'askFirstName': return 'Your first name...';
-      case 'askSurname': return 'Your surname...';
+      case 'askFullName': return 'Your full name...';
       case 'askTraderName': return 'Your shop/business name...';
       case 'askStoreAddress': return 'Your store address...';
       case 'askWholesale': return 'Type store name or tap above...';

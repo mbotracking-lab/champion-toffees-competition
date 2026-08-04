@@ -19,15 +19,10 @@ const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'champion_webhook_veri
 const BSP_PROVIDER = (process.env.BSP_PROVIDER || '360dialog') as '360dialog' | 'meta';
 
 // ─── Conversation State Management ───
-// Each phone number is tracked through a multi-step conversation.
-// State is stored in a simple in-memory map (safe for single-instance Vercel).
-// For multi-instance, use Upstash Redis or similar.
 
 type ConversationStep =
   | 'idle'
-  | 'askDob'
-  | 'askFirstName'
-  | 'askSurname'
+  | 'askFullName'
   | 'askTraderName'
   | 'askStoreAddress'
   | 'askWholesaleStore'
@@ -39,9 +34,7 @@ interface ConversationState {
   step: ConversationStep;
   entryId?: string;
   data: {
-    dateOfBirth?: string;
-    firstName?: string;
-    surname?: string;
+    fullName?: string;
     traderName?: string;
     storeAddress?: string;
     wholesaleStore?: string;
@@ -50,9 +43,8 @@ interface ConversationState {
   lastUpdated: number;
 }
 
-// In-memory conversation store. Entries expire after 30 minutes of inactivity.
 const conversations = new Map<string, ConversationState>();
-const CONVERSATION_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const CONVERSATION_TTL_MS = 30 * 60 * 1000;
 
 function cleanExpiredConversations() {
   const now = Date.now();
@@ -82,7 +74,7 @@ function resetConversation(phone: string): ConversationState {
 // ─── Participating stores cache ───
 let storesCache: string[] = [];
 let storesCacheTime = 0;
-const STORES_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const STORES_CACHE_TTL = 5 * 60 * 1000;
 
 async function getParticipatingStoreNames(): Promise<string[]> {
   const now = Date.now();
@@ -103,7 +95,6 @@ async function getParticipatingStoreNames(): Promise<string[]> {
 }
 
 // ─── Webhook Verification (GET) ───
-// Both Meta and 360dialog use the same hub.challenge handshake.
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -115,13 +106,11 @@ export async function GET(request: NextRequest) {
     console.log('[webhook] Verification successful');
     return new NextResponse(challenge, { status: 200 });
   }
-  console.warn('[webhook] Verification failed — mismatched token');
+  console.warn('[webhook] Verification failed');
   return NextResponse.json({ error: 'Verification failed' }, { status: 403 });
 }
 
 // ─── Webhook Message Handler (POST) ───
-// 360dialog forwards messages in the same format as Meta's webhook.
-// The structure is: body.entry[].changes[].value.messages[]
 
 export async function POST(request: NextRequest) {
   try {
@@ -133,21 +122,18 @@ export async function POST(request: NextRequest) {
       for (const change of changes) {
         const messages = (change.value || {}).messages || [];
         for (const message of messages) {
-          const from = message.from; // sender phone in international format
+          const from = message.from;
           const type = message.type;
-          const msgId = message.id; // WhatsApp message ID (for ack)
+          const msgId = message.id;
 
-          // Acknowledge receipt (prevents "clock" icon on WhatsApp)
           await markMessageAsRead(msgId);
 
           if (type === 'text') {
             await handleTextMessage(from, message.text?.body || '');
           } else if (type === 'image') {
             const imageId = message.image?.id || '';
-            const imageCaption = message.image?.caption || '';
-            await handleImageMessage(from, imageId, imageCaption);
+            await handleImageMessage(from, imageId);
           } else {
-            // Unsupported message type — guide user
             await sendWhatsAppMessage(
               from,
               'Please send a text message or a photo of your till slip to continue.'
@@ -165,25 +151,21 @@ export async function POST(request: NextRequest) {
 }
 
 // ─── Text Message Handler ───
-// Routes the user through the full competition entry flow step by step.
 
 async function handleTextMessage(phoneNumber: string, text: string) {
   const trimmed = text.trim();
   const lower = trimmed.toLowerCase();
-
   const conv = getConversation(phoneNumber);
 
-  // Global commands — work at any step
+  // Global commands
   if (lower === 'start' || lower === 'hi' || lower === 'hello' || lower === 'enter') {
-    // If they already have a pending entry, ask for the slip
     if (conv.step === 'askSlip' && conv.entryId) {
       await sendWhatsAppMessage(
         phoneNumber,
-        'Welcome back! You\'re almost done. Please send a photo of your till slip showing Champion Toffees products.'
+        'Welcome back! You\'re almost in. Send a photo of your till slip and we\'ll finish up! \uD83D\uDCF8'
       );
       return;
     }
-    // Otherwise restart fresh
     resetConversation(phoneNumber);
     await startNewEntry(phoneNumber);
     return;
@@ -193,7 +175,7 @@ async function handleTextMessage(phoneNumber: string, text: string) {
     resetConversation(phoneNumber);
     await sendWhatsAppMessage(
       phoneNumber,
-      'Entry cancelled. Send "Hi" or "Start" anytime to begin a new entry. Goodbye!'
+      'No worries, entries cancelled. Whenever you\'re ready, just send "Hi" to start fresh. \uD83D\uDE4C'
     );
     return;
   }
@@ -206,12 +188,13 @@ async function handleTextMessage(phoneNumber: string, text: string) {
   if (lower === 'help' || lower === '?') {
     await sendWhatsAppMessage(
       phoneNumber,
-      '*Champion Toffees Competition Help*\n\n'
-      + '*Start* — Begin a new competition entry\n'
-      + '*Status* — Check your latest entry result\n'
-      + '*Cancel* — Cancel current entry\n'
-      + '*Help* — Show this message\n\n'
-      + 'Send "Hi" or "Start" to begin!'
+      '*Champion \u2014 Upgrade Your Hustle* \uD83C\uDFC6\n\n'
+      + '*Start* \u2014 Enter the competition\n'
+      + '*Status* \u2014 Check your latest entry\n'
+      + '*Cancel* \u2014 Start over\n'
+      + '*Help* \u2014 This message\n\n'
+      + 'Prizes: *R1 000 weekly* + *R20 000 grand prize*!\n\n'
+      + 'Send "Hi" to get started \uD83D\uDE4C'
     );
     return;
   }
@@ -219,76 +202,28 @@ async function handleTextMessage(phoneNumber: string, text: string) {
   // Step-by-step flow
   switch (conv.step) {
     case 'idle':
-      // User sent text but hasn't started — guide them
       await sendWhatsAppMessage(
         phoneNumber,
-        'Welcome to the *Champion Toffees Competition*! \uD83C\uDFC6\n\n'
-        + 'Send "*Start*" or "*Hi*" to begin your entry.\n\n'
-        + 'Buy Champion Toffees from a participating store, snap your till slip, and win amazing prizes!'
+        'Hey there! Welcome to the *Champion \u2014 Upgrade Your Hustle* competition! \uD83C\uDFC6\n\n'
+        + 'Here\'s how it works:\n'
+        + '\uD83D\uDED2 *Buy* any 2 Champion or Candy Tops products\n'
+        + '\uD83D\uDCF7 *Snap* your till slip and send it here\n'
+        + '\uD83C\uDF89 *Win* R1 000 cash every week + R20 000 in grand prizes!\n\n'
+        + 'Ready to enter? Send "*Start*" or "*Hi*" and let\'s go! \uD83D\uDE4C'
       );
       break;
 
-    case 'askDob': {
-      // Validate date format DD/MM/YYYY
-      const dobMatch = trimmed.match(/^(\d{1,2})\s*[\/\-]\s*(\d{1,2})\s*[\/\-]\s*(\d{2,4})$/);
-      if (!dobMatch) {
-        await sendWhatsAppMessage(
-          phoneNumber,
-          'Please enter your date of birth in *DD/MM/YYYY* format.\nExample: 15/06/1990'
-        );
-        return;
-      }
-      const day = dobMatch[1].padStart(2, '0');
-      const month = dobMatch[2].padStart(2, '0');
-      let year = dobMatch[3];
-      if (year.length === 2) year = '19' + year;
-      const dob = `${day}/${month}/${year}`;
-
-      // Basic age check (must be 18+)
-      const birthDate = new Date(`${year}-${month}-${day}`);
-      const today = new Date();
-      let age = today.getFullYear() - birthDate.getFullYear();
-      const m = today.getMonth() - birthDate.getMonth();
-      if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) age--;
-
-      if (age < 18) {
-        await sendWhatsAppMessage(
-          phoneNumber,
-          'Sorry, you must be *18 years or older* to enter this competition. '\n'
-        );
-        resetConversation(phoneNumber);
-        return;
-      }
-
-      conv.data.dateOfBirth = dob;
-      conv.step = 'askFirstName';
-      await sendWhatsAppMessage(phoneNumber, 'What is your *first name*?');
-      break;
-    }
-
-    case 'askFirstName': {
+    case 'askFullName': {
       const name = trimmed.replace(/[^a-zA-Z\s'-]/g, '').trim();
-      if (name.length < 2) {
-        await sendWhatsAppMessage(phoneNumber, 'Please enter a valid first name (at least 2 characters).');
+      if (name.length < 3) {
+        await sendWhatsAppMessage(phoneNumber, 'That\'s a bit short \u2014 could you share your full name so we know who to contact if you win?');
         return;
       }
-      conv.data.firstName = name;
-      conv.step = 'askSurname';
-      await sendWhatsAppMessage(phoneNumber, 'What is your *surname*?');
-      break;
-    }
-
-    case 'askSurname': {
-      const surname = trimmed.replace(/[^a-zA-Z\s'-]/g, '').trim();
-      if (surname.length < 2) {
-        await sendWhatsAppMessage(phoneNumber, 'Please enter a valid surname (at least 2 characters).');
-        return;
-      }
-      conv.data.surname = surname;
+      conv.data.fullName = name;
       conv.step = 'askTraderName';
       await sendWhatsAppMessage(
         phoneNumber,
-        'What is the *name of the trader/spaza shop* you bought from? (Or type "N/A" if not applicable)'
+        'Nice to meet you, ' + name + '! \uD83D\uDE0A\n\nWhat\'s the name of the *trader or spaza shop* where you bought? (Type "N/A" if it\'s for yourself)'
       );
       break;
     }
@@ -298,42 +233,36 @@ async function handleTextMessage(phoneNumber: string, text: string) {
       conv.step = 'askStoreAddress';
       await sendWhatsAppMessage(
         phoneNumber,
-        'What is the *address or area* of the store? (e.g., "Khayelitsha Site C" or "CBD Johannesburg")'
+        'And which *area or address* is the shop in? (e.g., "Khayelitsha Site C" or "CBD Johannesburg")'
       );
       break;
     }
 
     case 'askStoreAddress': {
       if (trimmed.length < 3) {
-        await sendWhatsAppMessage(phoneNumber, 'Please enter a valid store address or area.');
+        await sendWhatsAppMessage(phoneNumber, 'Could you be a bit more specific? Even just the neighbourhood works.');
         return;
       }
       conv.data.storeAddress = trimmed;
       conv.step = 'askWholesaleStore';
 
-      // Send list of participating wholesale stores
       const stores = await getParticipatingStoreNames();
-      const storeList = stores
-        .map((name, i) => `${i + 1}. ${name}`)
-        .join('\n');
+      const storeList = stores.map((name, i) => `${i + 1}. ${name}`).join('\n');
 
       await sendWhatsAppMessage(
         phoneNumber,
-        `Which *wholesale store* did you purchase from?\n\n${storeList}\n\nType the name or number.`
+        `Which *wholesale store* did you buy from?\n\n${storeList}\n\nType the name or number.\n`
       );
       break;
     }
 
     case 'askWholesaleStore': {
       const stores = await getParticipatingStoreNames();
-
-      // Check if they typed a number
       const num = parseInt(trimmed);
       let selectedStore = '';
       if (!isNaN(num) && num >= 1 && num <= stores.length) {
         selectedStore = stores[num - 1];
       } else {
-        // Fuzzy match against store names
         const lowerInput = trimmed.toLowerCase();
         selectedStore = stores.find(
           (s) => s.toLowerCase().includes(lowerInput) || lowerInput.includes(s.toLowerCase())
@@ -343,8 +272,7 @@ async function handleTextMessage(phoneNumber: string, text: string) {
       if (!selectedStore) {
         await sendWhatsAppMessage(
           phoneNumber,
-          'Store not recognised. Please type the *name* or *number* from the list above.\n\n'
-          + 'Send "Cancel" to start over.'
+          'Hmm, I don\'t recognise that one. Could you type the name or number from the list?\n\nSend "Cancel" to start over.'
         );
         return;
       }
@@ -353,13 +281,12 @@ async function handleTextMessage(phoneNumber: string, text: string) {
       conv.step = 'askPhone';
       await sendWhatsAppMessage(
         phoneNumber,
-        'What is your *contact phone number*? (in case we need to contact you about a prize)'
+        'Almost there! \uD83D\uDE4C What\'s the best *phone number* to reach you if you win?'
       );
       break;
     }
 
     case 'askPhone': {
-      // Clean phone number — keep only digits, add +27 if starts with 0
       const digits = trimmed.replace(/[^0-9]/g, '');
       let phone = digits;
       if (phone.startsWith('0') && phone.length === 10) {
@@ -372,7 +299,7 @@ async function handleTextMessage(phoneNumber: string, text: string) {
       if (phone.length < 10 || phone.length > 15) {
         await sendWhatsAppMessage(
           phoneNumber,
-          'Please enter a valid South African phone number.\nExample: 0721234567 or +27721234567'
+          'Hmm, that doesn\'t look right. Could you double-check? \uD83D\uDCDE\nExample: 0721234567'
         );
         return;
       }
@@ -380,7 +307,6 @@ async function handleTextMessage(phoneNumber: string, text: string) {
       conv.data.consumerPhone = phone;
       conv.step = 'askSlip';
 
-      // Create the entry in the database
       try {
         const maxEntry = await db.competitionEntry.findFirst({
           orderBy: { entryNumber: 'desc' },
@@ -388,16 +314,21 @@ async function handleTextMessage(phoneNumber: string, text: string) {
         });
         const entryNumber = (maxEntry?.entryNumber || 0) + 1;
 
+        // Split full name for DB compatibility
+        const nameParts = (conv.data.fullName || '').split(/\s+/);
+        const firstName = nameParts[0] || '';
+        const surname = nameParts.slice(1).join(' ') || '';
+
         const newEntry = await db.competitionEntry.create({
           data: {
-            dateOfBirth: conv.data.dateOfBirth || '',
-            firstName: conv.data.firstName || '',
-            surname: conv.data.surname || '',
+            dateOfBirth: '',
+            firstName,
+            surname,
             traderName: conv.data.traderName || '',
             storeAddress: conv.data.storeAddress || '',
             wholesaleStore: conv.data.wholesaleStore || '',
             consumerPhone: phone,
-            consumerName: `${conv.data.firstName} ${conv.data.surname}`,
+            consumerName: conv.data.fullName || '',
             consumerLocation: conv.data.storeAddress || '',
             entryNumber,
             validationResult: 'pending',
@@ -408,21 +339,21 @@ async function handleTextMessage(phoneNumber: string, text: string) {
 
         await sendWhatsAppMessage(
           phoneNumber,
-          `*Entry #${entryNumber} registered!* \u2705\n\n`
-          + `Name: ${conv.data.firstName} ${conv.data.surname}\n`
+          `*Entry #${entryNumber} is in!* \u2705\n\n`
+          + `Name: ${conv.data.fullName}\n`
           + `Store: ${conv.data.wholesaleStore}\n\n`
-          + `Now send a *clear photo of your till slip* showing Champion Toffees products.\n\n`
-          + `Make sure the slip shows:\n`
-          + `\u2022 Store name\n`
-          + `\u2022 Date\n`
-          + `\u2022 Champion Toffees product(s)\n\n`
-          + `Take the photo in good lighting for best results! \uD83D\uDCF8`
+          + `Now for the fun part \u2014 send a *clear photo of your till slip*! \uD83D\uDCF8\n\n`
+          + `Make sure we can see:\n`
+          + `\u2022 The store name\n`
+          + `\u2022 The date\n`
+          + `\u2022 At least 2 Champion or Candy Tops products\n\n`
+          + `Good lighting helps a lot! \u2600\ufe0f`
         );
       } catch (dbError) {
         console.error('[webhook] Failed to create entry:', dbError);
         await sendWhatsAppMessage(
           phoneNumber,
-          'Sorry, something went wrong saving your entry. Please try again by sending "Start".'
+          'Sorry, something went wrong on our end. Please send "Start" to try again.'
         );
         resetConversation(phoneNumber);
       }
@@ -432,15 +363,14 @@ async function handleTextMessage(phoneNumber: string, text: string) {
     case 'askSlip':
       await sendWhatsAppMessage(
         phoneNumber,
-        'Please send a *photo* of your till slip.\n\n'
-        + 'To take a photo: tap the \uD83D\uDCF7 icon (or paperclip \uD83D\uDCCE) and select "Camera" or "Gallery".'
+        'Please send a *photo* of your till slip.\n\nTap the \uD83D\uDCF7 icon (or paperclip \uD83D\uDCCE) and select "Camera" or "Gallery".'
       );
       break;
 
     case 'validating':
       await sendWhatsAppMessage(
         phoneNumber,
-        'Your till slip is being validated. Please wait for the result... \u23F3'
+        'Still checking your slip... hang tight! \u23F3'
       );
       break;
 
@@ -450,22 +380,20 @@ async function handleTextMessage(phoneNumber: string, text: string) {
 }
 
 // ─── Image Message Handler ───
-// Downloads the image from WhatsApp, runs VLM validation, updates the entry.
 
-async function handleImageMessage(phoneNumber: string, imageId: string, caption: string) {
+async function handleImageMessage(phoneNumber: string, imageId: string) {
   const conv = getConversation(phoneNumber);
 
   if (conv.step !== 'askSlip' || !conv.entryId) {
-    // If they haven't started an entry yet
     if (conv.step === 'idle') {
       await sendWhatsAppMessage(
         phoneNumber,
-        'Please start your entry first! Send "*Start*" or "*Hi*" to begin.'
+        'Hey! Send "*Start*" first so we can get you entered. \uD83D\uDE0A'
       );
     } else {
       await sendWhatsAppMessage(
         phoneNumber,
-        'I\'m expecting text input right now, not a photo. Please type your response or send "Help".'
+        'I\'m waiting for a text response right now \u2014 type your answer or send "Help" to see your options.'
       );
     }
     return;
@@ -474,88 +402,79 @@ async function handleImageMessage(phoneNumber: string, imageId: string, caption:
   conv.step = 'validating';
   await sendWhatsAppMessage(
     phoneNumber,
-    'Till slip received! \uD83D\uDCF8 Validating... please wait (this takes about 30 seconds). \u23F3'
+    'Got it! \uD83D\uDCF8 Let me take a look at that slip... give me about 30 seconds! \u23F3'
   );
 
   try {
-    // Step 1: Download the image from WhatsApp
     const imageBase64 = await downloadWhatsAppImage(imageId);
     if (!imageBase64) {
       await sendWhatsAppMessage(
         phoneNumber,
-        'Sorry, I couldn\'t download your photo. Please try sending it again.'
+        'Sorry, I couldn\'t download your photo. Could you try sending it again?'
       );
       conv.step = 'askSlip';
       return;
     }
 
-    // Step 2: Store the image in the database
     await db.competitionEntry.update({
       where: { id: conv.entryId },
       data: { slipPhotoData: imageBase64 },
     });
 
-    // Step 3: Run VLM validation (same logic as the web upload route)
     const result = await validateTillSlip(conv.entryId, imageBase64);
 
-    // Step 4: Send result to user
     if (result.result === 'confirmed') {
       await sendWhatsAppMessage(
         phoneNumber,
-        `*\u2705 Entry Confirmed!*\n\n`
-        + `Your till slip has been validated:\n`
+        `*\u2705 You\'re in the draw!*\n\n`
+        + `We verified your slip:\n`
         + `\u2022 Store: ${result.storeName}\n`
         + `\u2022 Date: ${result.slipDate}\n`
-        + `\u2022 Amount: R${result.slipAmount}\n`
-        + `\u2022 Products: ${result.championProducts}\n`
-        + `\u2022 Confidence: ${Math.round(result.confidence * 100)}%\n\n`
-        + `You\'re in the draw! Good luck! \uD83C\uDF89`
+        + `\u2022 Products: ${result.championProducts}\n\n`
+        + `You\'re now eligible for our *R1 000 weekly cash prize* and the *R20 000 grand prize*! \uD83C\uDF89\n\n`
+        + `Buy more Champion products for more chances. Good luck! \uD83C\uDFC6`
       );
     } else if (result.result === 'rejected') {
       await sendWhatsAppMessage(
         phoneNumber,
-        `*\u274C Entry Rejected*\n\n${result.reason}\n\n`
-        + `Send "*Start*" to try again with a different till slip.`
+        `*\u274C Not quite right*\n\n${result.reason}\n\n`
+        + `No stress \u2014 grab another slip and send "*Start*" to try again. \uD83D\uDE4A`
       );
     } else if (result.result === 'duplicate') {
       await sendWhatsAppMessage(
         phoneNumber,
-        `*\u26A0\ufe0f Duplicate Entry*\n\n${result.reason}\n\n`
-        + `Each till slip can only be entered once.`
+        `*\u26A0\ufe0f We\'ve already seen this slip*\n\n${result.reason}\n\n`
+        + `Each till slip can only be entered once, but you can try with a different one! Send "*Start*". \uD83D\uDE0A`
       );
     } else {
-      // pending — VLM was unavailable
       await sendWhatsAppMessage(
         phoneNumber,
-        `*\u23F3 Pending Review*\n\n${result.reason}\n\n`
-        + `Send "*Status*" later to check your result.`
+        `*\u23F3 We\'re still checking your slip*\n\n${result.reason}\n\n`
+        + `Send "*Status*" in a bit to see your result.`
       );
     }
 
-    // Reset conversation for next entry
     resetConversation(phoneNumber);
   } catch (error) {
     console.error('[webhook] Image handling error:', error);
     await sendWhatsAppMessage(
       phoneNumber,
-      'Something went wrong processing your till slip. Please try again by sending "Start".'
+      'Something went wrong processing your slip. Please send "Start" to try again.'
     );
     resetConversation(phoneNumber);
   }
 }
 
 // ─── Download WhatsApp Image ───
-// Works with both Meta Direct API and 360dialog.
 
 async function downloadWhatsAppImage(mediaId: string): Promise<string | null> {
   const API_TOKEN = process.env.WHATSAPP_API_TOKEN;
   if (!API_TOKEN) {
-    console.error('[webhook] WHATSAPP_API_TOKEN not set — cannot download image');
+    console.error('[webhook] WHATSAPP_API_TOKEN not set');
     return null;
   }
 
   try {
-    // Step 1: Get the media URL
     let mediaUrl = '';
     if (BSP_PROVIDER === '360dialog') {
       const res = await fetch(`https://waba.360dialog.io/v1/media/${mediaId}`, {
@@ -568,7 +487,6 @@ async function downloadWhatsAppImage(mediaId: string): Promise<string | null> {
       const data = await res.json();
       mediaUrl = data.url || data.media?.url || '';
     } else {
-      // Meta Direct API
       const res = await fetch(`https://graph.facebook.com/v21.0/${mediaId}`, {
         headers: { 'Authorization': `Bearer ${API_TOKEN}` },
       });
@@ -585,7 +503,6 @@ async function downloadWhatsAppImage(mediaId: string): Promise<string | null> {
       return null;
     }
 
-    // Step 2: Download the actual image
     const imageRes = await fetch(mediaUrl);
     if (!imageRes.ok) {
       console.error(`[webhook] Image download failed: ${imageRes.status}`);
@@ -603,29 +520,23 @@ async function downloadWhatsAppImage(mediaId: string): Promise<string | null> {
 }
 
 // ─── VLM Till Slip Validation ───
-// Identical logic to the web upload route.
 
 async function validateTillSlip(
   entryId: string,
   imageBase64: string
 ): Promise<{
-  result: 'confirmed' | 'rejected' | 'duplicate' | 'pending';
-  reason: string;
-  storeName: string;
-  slipDate: string;
-  slipAmount: string;
-  championProducts: string;
-  confidence: number;
-}> {
-  // Default: pending
+    result: 'confirmed' | 'rejected' | 'duplicate' | 'pending';
+    reason: string;
+    storeName: string;
+    slipDate: string;
+    slipAmount: string;
+    championProducts: string;
+    confidence: number;
+  }> {
   let defaultResult = {
     result: 'pending' as const,
-    reason: 'Validation in progress — check back shortly.',
-    storeName: '',
-    slipDate: '',
-    slipAmount: '',
-    championProducts: '',
-    confidence: 0,
+    reason: 'Validation in progress \u2014 check back shortly.',
+    storeName: '', slipDate: '', slipAmount: '', championProducts: '', confidence: 0,
   };
 
   const entry = await db.competitionEntry.findUnique({ where: { id: entryId } });
@@ -651,7 +562,7 @@ async function validateTillSlip(
 Check for:
 1. Is this a valid South African store receipt/till slip?
 2. Does the store name on the receipt match one of the PARTICIPATING STORES listed below? (Allow for minor variations like abbreviations, different spacing, or partial names)
-3. Does it contain any Champion Toffees or Champion Sweets products?
+3. Does it contain any Champion Toffees, Champion Sweets, or Candy Tops products? (At least 2 products required to enter)
 4. Is this receipt authentic (not fabricated, edited, or a screenshot)?
 
 PARTICIPATING STORES (only these stores are eligible):
@@ -704,10 +615,10 @@ Respond ONLY with a JSON object in this exact format (no markdown fences, no ext
       validationReason = parsed.rejectionReason || 'Not a valid receipt';
     } else if (parsed.isFromParticipatingStore === false) {
       validationResult = 'rejected';
-      validationReason = `The store "${parsed.storeName || 'unknown'}" is not a participating store in this competition. Only receipts from eligible stores qualify.`;
+      validationReason = `The store "${parsed.storeName || 'unknown'}" is not a participating store in this competition.`;
     } else if (!parsed.hasChampionProducts) {
       validationResult = 'rejected';
-      validationReason = 'No Champion products found on the till slip.';
+      validationReason = 'No Champion or Candy Tops products found on the till slip. You need at least 2 products to enter.';
     } else {
       validationResult = 'confirmed';
       validationReason = 'Champion products verified on till slip from participating store.';
@@ -735,61 +646,38 @@ Respond ONLY with a JSON object in this exact format (no markdown fences, no ext
     let isFraud = false;
     if (validationResult === 'confirmed') {
       const similarCount = await db.competitionEntry.count({
-        where: {
-          consumerPhone: entry.consumerPhone,
-          storeName: storeName,
-          validationResult: 'confirmed',
-        },
+        where: { consumerPhone: entry.consumerPhone, storeName: storeName, validationResult: 'confirmed' },
       });
       if (similarCount > 5) {
         isFraud = true;
         validationResult = 'rejected';
-        validationReason = 'Multiple similar entries detected — flagged for review.';
+        validationReason = 'Multiple similar entries detected \u2014 flagged for review.';
       }
     }
 
-    // Update the entry in the database
     await db.competitionEntry.update({
       where: { id: entryId },
       data: {
         validated: validationResult === 'confirmed',
-        validationResult,
-        validationReason,
-        storeName,
-        slipDate,
-        slipAmount,
-        championProducts,
-        confidenceScore,
-        isDuplicate: validationResult === 'duplicate',
-        isFraud,
+        validationResult, validationReason, storeName, slipDate, slipAmount,
+        championProducts, confidenceScore,
+        isDuplicate: validationResult === 'duplicate', isFraud,
       },
     });
 
-    return {
-      result: validationResult,
-      reason: validationReason,
-      storeName,
-      slipDate,
-      slipAmount,
-      championProducts,
-      confidence: Number(confidenceScore) / 100,
-    };
+    return { result: validationResult, reason: validationReason, storeName, slipDate, slipAmount, championProducts, confidence: Number(confidenceScore) / 100 };
   } catch (vlmError) {
     const errMsg = vlmError instanceof Error ? vlmError.message : String(vlmError);
     console.error('[webhook] VLM error:', errMsg);
 
-    // On VLM failure, mark as pending for batch review later
     const pendingReason =
       errMsg.includes('429') || errMsg.includes('rate limit')
-        ? 'Validation is busy — your entry will be reviewed within 30 minutes.'
-        : 'Your till slip is under review — results will be available shortly.';
+        ? 'Validation is busy \u2014 your entry will be reviewed within 30 minutes.'
+        : 'Your till slip is under review \u2014 results will be available shortly.';
 
     await db.competitionEntry.update({
       where: { id: entryId },
-      data: {
-        validationResult: 'pending',
-        validationReason: pendingReason,
-      },
+      data: { validationResult: 'pending', validationReason: pendingReason },
     });
 
     return { ...defaultResult, reason: pendingReason };
@@ -797,7 +685,6 @@ Respond ONLY with a JSON object in this exact format (no markdown fences, no ext
 }
 
 // ─── Check Entry Status ───
-// Lets a user check their latest entry result.
 
 async function checkEntryStatus(phoneNumber: string) {
   try {
@@ -807,25 +694,19 @@ async function checkEntryStatus(phoneNumber: string) {
     });
 
     if (!latestEntry) {
-      await sendWhatsAppMessage(
-        phoneNumber,
-        'No entries found for your number. Send "*Start*" to enter!'
-      );
+      await sendWhatsAppMessage(phoneNumber, 'No entries found for your number yet. Send "*Start*" to enter! \uD83C\uDFC6');
       return;
     }
 
     const statusEmoji =
-      latestEntry.validationResult === 'confirmed'
-        ? '\u2705'
-        : latestEntry.validationResult === 'rejected'
-          ? '\u274C'
-          : latestEntry.validationResult === 'duplicate'
-            ? '\u26A0\ufe0f'
+      latestEntry.validationResult === 'confirmed' ? '\u2705'
+        : latestEntry.validationResult === 'rejected' ? '\u274C'
+          : latestEntry.validationResult === 'duplicate' ? '\u26A0\ufe0f'
             : '\u23F3';
 
     await sendWhatsAppMessage(
       phoneNumber,
-      `*Entry #${latestEntry.entryNumber} — ${statusEmoji} ${latestEntry.validationResult.toUpperCase()}*\n\n`
+      `*Entry #${latestEntry.entryNumber} \u2014 ${statusEmoji} ${latestEntry.validationResult.toUpperCase()}*\n\n`
       + `Name: ${latestEntry.consumerName}\n`
       + `Store: ${latestEntry.storeName || 'N/A'}\n`
       + `Date: ${latestEntry.slipDate || 'N/A'}\n`
@@ -835,7 +716,7 @@ async function checkEntryStatus(phoneNumber: string) {
     );
   } catch (error) {
     console.error('[webhook] Status check error:', error);
-    await sendWhatsAppMessage(phoneNumber, 'Could not check your entry status. Please try again later.');
+    await sendWhatsAppMessage(phoneNumber, 'Could not check your entry right now. Please try again in a bit.');
   }
 }
 
@@ -843,21 +724,19 @@ async function checkEntryStatus(phoneNumber: string) {
 
 async function startNewEntry(phoneNumber: string) {
   const conv = getConversation(phoneNumber);
-  conv.step = 'askDob';
+  conv.step = 'askFullName';
   conv.data = {};
   conv.lastUpdated = Date.now();
 
   await sendWhatsAppMessage(
     phoneNumber,
-    '*Champion Toffees Competition* \uD83C\uDFC6\n\n'
-    + 'Let\'s get you entered! I\'ll ask you a few quick questions.\n\n'
-    + 'First, what is your *date of birth*?\n'
-    + '(Format: DD/MM/YYYY — you must be 18 or older to enter)'
+    '*Champion \u2014 Upgrade Your Hustle* \uD83C\uDFC6\n\n'
+    + 'Awesome, let\'s get you entered! Just a few quick questions.\n\n'
+    + 'What\'s your *full name*?'
   );
 }
 
 // ─── Send WhatsApp Message ───
-// Supports both 360dialog and Meta Direct API.
 
 async function sendWhatsAppMessage(to: string, message: string) {
   const API_TOKEN = process.env.WHATSAPP_API_TOKEN;
@@ -871,28 +750,20 @@ async function sendWhatsAppMessage(to: string, message: string) {
   try {
     let url: string;
     const body: Record<string, unknown> = {
-      to,
-      type: 'text',
-      text: { body: message },
+      to, type: 'text', text: { body: message },
     };
 
     if (BSP_PROVIDER === '360dialog') {
-      // 360dialog API format
       url = 'https://waba.360dialog.io/v1/messages';
       body['preview_url'] = false;
-      // 360dialog doesn't need messaging_product field
     } else {
-      // Meta Direct API format
       url = `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`;
       body['messaging_product'] = 'whatsapp';
     }
 
     const res = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${API_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Authorization': `Bearer ${API_TOKEN}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
 
@@ -906,35 +777,20 @@ async function sendWhatsAppMessage(to: string, message: string) {
 }
 
 // ─── Mark Message as Read ───
-// Removes the "clock" icon (pending) and shows "blue ticks" (read).
 
 async function markMessageAsRead(messageId: string) {
   const API_TOKEN = process.env.WHATSAPP_API_TOKEN;
   const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
-
   if (!API_TOKEN || !PHONE_NUMBER_ID) return;
+  if (BSP_PROVIDER === '360dialog') return; // 360dialog auto-acks
 
   try {
-    let url: string;
-    const body: Record<string, unknown> = { status: 'read' };
-
-    if (BSP_PROVIDER === '360dialog') {
-      // 360dialog doesn't support marking as read via message ID
-      // It auto-acks. Skip this call.
-      return;
-    }
-
-    // Meta Direct API
-    url = `https://graph.facebook.com/v21.0/${messageId}`;
-    await fetch(url, {
+    await fetch(`https://graph.facebook.com/v21.0/${messageId}`, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${API_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
+      headers: { 'Authorization': `Bearer ${API_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'read' }),
     });
   } catch {
-    // Non-critical — don't block the flow
+    // Non-critical
   }
 }
