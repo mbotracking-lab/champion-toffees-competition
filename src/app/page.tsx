@@ -103,8 +103,8 @@ const BRAND = {
 const CHAT_FLOW: { phase: ChatPhase; botMessage: string }[] = [
   { phase: 'greeting', botMessage: 'Hey there! Welcome to Champion — Upgrade Your Hustle! 🏆\n\nHere\'s how it works:\n🛒 Buy any 2 Champion or Candy Tops products\n📷 Snap your till slip\n🎉 Win R1 000 cash every week + R20 000 in grand prizes!\n\nLet\'s get you entered!' },
   { phase: 'askFullName', botMessage: 'What\'s your full name?' },
-  { phase: 'askTraderName', botMessage: 'Nice! What\'s the name of the trader or spaza shop where you bought? (Type "N/A" if it\'s for yourself)' },
-  { phase: 'askStoreAddress', botMessage: 'And which area or address is the shop in? (e.g., "Khayelitsha Site C")' },
+  { phase: 'askTraderName', botMessage: 'Nice! What is the name of your shop or business? (Type "N/A" if you\'re buying for yourself)' },
+  { phase: 'askStoreAddress', botMessage: 'What is your shop or business address?' },
   { phase: 'askWholesale', botMessage: 'Which wholesale store did you buy from?\n\nTap a store below or type the name:' },
   { phase: 'askPhone', botMessage: 'Almost there! 🙌 What\'s the best phone number to reach you if you win?' },
   { phase: 'confirmDetails', botMessage: 'Let me just confirm everything:' },
@@ -824,7 +824,7 @@ export default function ChampionChatPage() {
     switch (phase) {
       case 'askFullName': return 'Your full name...';
       case 'askTraderName': return 'Your shop/business name...';
-      case 'askStoreAddress': return 'Your store address...';
+      case 'askStoreAddress': return 'Your shop or business address...';
       case 'askWholesale': return 'Type store name or tap above...';
       case 'askPhone': return 'e.g. 0821234567';
       case 'confirmDetails': return 'Type "yes" or "no"...';

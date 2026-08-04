@@ -223,7 +223,7 @@ async function handleTextMessage(phoneNumber: string, text: string) {
       conv.step = 'askTraderName';
       await sendWhatsAppMessage(
         phoneNumber,
-        'Nice to meet you, ' + name + '! \uD83D\uDE0A\n\nWhat\'s the name of your *spaza or tuck shop*? (Type "N/A" if you\'re buying for yourself)'
+        'Nice to meet you, ' + name + '! \uD83D\uDE0A\n\nWhat is the name of your *shop or business*? (Type "N/A" if you\'re buying for yourself)'
       );
       break;
     }
@@ -233,7 +233,7 @@ async function handleTextMessage(phoneNumber: string, text: string) {
       conv.step = 'askStoreAddress';
       await sendWhatsAppMessage(
         phoneNumber,
-        'And which *area* is your shop in? (e.g., "Khayelitsha Site C" or "CBD Johannesburg")'
+        'What is your *shop or business address*?'
       );
       break;
     }
